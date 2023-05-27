@@ -1,0 +1,4 @@
+trained_models/
+tfevent_train/
+.vscode/
+__pycache__/
