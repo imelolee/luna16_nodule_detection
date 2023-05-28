@@ -21,13 +21,13 @@ import torch
 from generate_transforms import generate_detection_inference_transform
 
 import monai
-from networks.retinanet.retinanet_detector import RetinaNetDetector
+from networks.retinanet_detector import RetinaNetDetector
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")
@@ -60,14 +60,6 @@ def main():
     patch_size = args.val_patch_size
 
     # 1. define transform
-    # intensity_transform = ScaleIntensityRanged(
-    #     keys=["image"],
-    #     a_min=-1024,
-    #     a_max=300.0,
-    #     b_min=0.0,
-    #     b_max=1.0,
-    #     clip=True,
-    # )
     intensity_transform = ScaleIntensityRanged(
         keys=["image"],
         a_min=0,
@@ -119,7 +111,7 @@ def main():
     )
 
     # 2) build network
-    net = torch.jit.load(env_dict["model_path"]).to(device)
+    net = torch.load(env_dict["model_path"]).to(device)
     print(f"Load model from {env_dict['model_path']}")
 
     # 3) build detector
