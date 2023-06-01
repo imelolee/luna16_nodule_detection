@@ -30,6 +30,7 @@ from monai.networks.blocks.feature_pyramid_network import ExtraFPNBlock, Feature
 rearrange, _ = optional_import("einops", name="rearrange")
 
 __all__ = [
+    "ResBlock3d",
     "SwinUNETR",
     "window_partition",
     "window_reverse",
@@ -41,6 +42,44 @@ __all__ = [
     "BasicLayer",
     "SwinTransformer",
 ]
+
+
+class ResBlock3d(nn.Module):
+    def __init__(
+            self, 
+            n_in: int = 1, 
+            n_out: int = 24, 
+            stride: int =1 
+        ):
+
+        super(ResBlock3d, self).__init__()
+        self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
+                               stride=stride, padding=1)
+        self.bn1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm3d(n_out, momentum=0.1)
+
+        if stride != 1 or n_out != n_in:
+            self.shortcut = nn.Sequential(
+                nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
+                nn.BatchNorm3d(n_out, momentum=0.1))
+        else:
+            self.shortcut = None
+
+    def forward(self, x):
+        residual = x
+        if self.shortcut is not None:
+            residual = self.shortcut(x)
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += residual
+        out = self.relu(out)
+        return out
 
 
 class SwinUNETR(nn.Module):
@@ -130,8 +169,14 @@ class SwinUNETR(nn.Module):
 
         self.normalize = normalize
 
+        self.preBlock = nn.Sequential(
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
+            ResBlock3d(n_in=feature_size, n_out=feature_size*2, stride=1),
+            ResBlock3d(n_in=feature_size*2, n_out=feature_size, stride=1),
+        )
+
         self.swinViT = SwinTransformer(
-            in_chans=in_channels,
+            in_chans=feature_size,
             embed_dim=feature_size,
             window_size=window_size,
             patch_size=patch_size,
@@ -302,16 +347,19 @@ class SwinUNETR(nn.Module):
             )
 
     def forward(self, x_in):
+        x_in = self.preBlock(x_in)
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
+        enc1 = self.encoder2(hidden_states_out[0]) # 1/2
         enc2 = self.encoder3(hidden_states_out[1]) # 1/4
         enc3 = self.encoder4(hidden_states_out[2]) # 1/8
         dec4 = self.encoder10(hidden_states_out[4]) # 1/32
         dec3 = self.decoder5(dec4, hidden_states_out[3]) # 1/16
         dec2 = self.decoder4(dec3, enc3) # 1/8, 192
         dec1 = self.decoder3(dec2, enc2) # 1/4, 96
+        dec0 = self.decoder2(dec1, enc1) # 1/2, 48
       
-        return {'0': dec1, '1': dec2}
+        return {'0': dec0, '1': dec1}
 
 def window_partition(x, window_size):
     """window partition operation based on: "Liu et al.,

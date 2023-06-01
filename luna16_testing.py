@@ -18,7 +18,7 @@ from copy import deepcopy
 
 import numpy as np
 import torch
-from generate_transforms import generate_detection_inference_transform
+from generate_transforms import generate_detection_inference_transform, pad2factor
 
 import monai
 from networks.retinanet_detector import RetinaNetDetector
@@ -146,7 +146,7 @@ def main():
             use_inferer = not all(
                 [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
             )
-            inference_inputs = [inference_data_i["image"].to(device) for inference_data_i in inference_data]
+            inference_inputs = [pad2factor(inference_data_i["image"]).to(device) for inference_data_i in inference_data]
 
             if amp:
                 with torch.cuda.amp.autocast():

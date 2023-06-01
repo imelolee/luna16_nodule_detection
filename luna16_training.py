@@ -20,6 +20,7 @@ import torch
 from generate_transforms import (
     generate_detection_train_transform,
     generate_detection_val_transform,
+    pad2factor
 )
 from torch.utils.tensorboard import SummaryWriter
 from visualize_image import visualize_one_xy_slice_in_3d_image
@@ -164,18 +165,8 @@ def main():
     )
 
     # 2) build network
-
-    # backbone = resnet.ResNet(
-    #     block=resnet.ResNetBottleneck,
-    #     layers=[3, 4, 6, 3],
-    #     block_inplanes=resnet.get_inplanes(),
-    #     n_input_channels=args.n_input_channels,
-    #     conv1_t_stride=args.conv1_t_stride,
-    #     conv1_t_size=conv1_t_size,
-    # )
-
     backbone = SwinUNETR(
-        img_size=(96, 96, 96),
+        img_size=(128, 128, 128),
         in_channels=1,
         out_channels=128,
         feature_size=48,
@@ -250,7 +241,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 300
+    max_epochs = 200
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
     for epoch in range(max_epochs):
@@ -335,7 +326,7 @@ def main():
                     use_inferer = not all(
                         [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
                     )
-                    val_inputs = [val_data_i.pop("image").to(device) for val_data_i in val_data]
+                    val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
 
                     if amp:
                         with torch.cuda.amp.autocast():

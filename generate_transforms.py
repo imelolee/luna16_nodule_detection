@@ -10,7 +10,9 @@
 # limitations under the License.
 
 import torch
+import torch.nn.functional as F
 import numpy as np
+import math
 from monai.transforms import (
     Compose,
     DeleteItemsd,
@@ -26,8 +28,6 @@ from monai.transforms import (
     RandShiftIntensityd,
 )
 from monai.apps.detection.transforms.dictionary import (
-    AffineBoxToImageCoordinated,
-    AffineBoxToWorldCoordinated,
     BoxToMaskd,
     ClipBoxToImaged,
     ConvertBoxToStandardModed,
@@ -86,12 +86,6 @@ def generate_detection_train_transform(
             intensity_transform,
             EnsureTyped(keys=[image_key], dtype=torch.float16),
             ConvertBoxToStandardModed(box_keys=[box_key], mode=gt_box_mode),
-            # AffineBoxToImageCoordinated(
-            #     box_keys=[box_key],
-            #     box_ref_image_keys=image_key,
-            #     image_meta_key_postfix="meta_dict",
-            #     affine_lps_to_ras=affine_lps_to_ras,
-            # ),
             RandCropBoxByPosNegLabeld(
                 image_keys=[image_key],
                 box_keys=box_key,
@@ -231,12 +225,6 @@ def generate_detection_val_transform(
             Orientationd(keys=[image_key], axcodes="RAS"),
             intensity_transform,
             ConvertBoxToStandardModed(box_keys=[box_key], mode=gt_box_mode),
-            # AffineBoxToImageCoordinated(
-            #     box_keys=[box_key],
-            #     box_ref_image_keys=image_key,
-            #     image_meta_key_postfix="meta_dict",
-            #     affine_lps_to_ras=affine_lps_to_ras,
-            # ),
             EnsureTyped(keys=[image_key, box_key], dtype=compute_dtype),
             EnsureTyped(keys=label_key, dtype=torch.long),
         ]
@@ -307,3 +295,15 @@ def generate_detection_inference_transform(
         ]
     )
     return test_transforms, post_transforms
+
+def pad2factor(image, factor=64, pad_value=0):
+    _, depth, height, width = image.shape
+    d = int(math.ceil(depth / float(factor))) * factor
+    h = int(math.ceil(height / float(factor))) * factor
+    w = int(math.ceil(width / float(factor))) * factor
+
+    pad = (0, w-width, 0, h-height, 0, d-depth)
+
+    image = F.pad(image, pad, 'constant', value=pad_value)
+
+    return image
