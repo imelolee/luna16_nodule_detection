@@ -297,17 +297,17 @@ class SwinUNETR(nn.Module):
 
 
     def forward(self, x_in):
-        x_in = self.preBlock(x_in)
+        x_in = self.preBlock(x_in) # 1/2
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
-        enc1 = self.encoder2(hidden_states_out[0]) # 1/2
-        enc2 = self.encoder3(hidden_states_out[1]) # 1/4
-        enc3 = self.encoder4(hidden_states_out[2]) # 1/8
-        dec4 = self.encoder10(hidden_states_out[4]) # 1/32
-        dec3 = self.decoder5(dec4, hidden_states_out[3]) # 1/16
-        dec2 = self.decoder4(dec3, enc3) # 1/8, 192
-        dec1 = self.decoder3(dec2, enc2) # 1/4, 96
-        dec0 = self.decoder2(dec1, enc1) # 1/2, 48
+        enc1 = self.encoder2(hidden_states_out[0]) # 1/4, 48
+        enc2 = self.encoder3(hidden_states_out[1]) # 1/8, 96
+        enc3 = self.encoder4(hidden_states_out[2]) # 1/16, 192
+        dec4 = self.encoder10(hidden_states_out[4]) 
+        dec3 = self.decoder5(dec4, hidden_states_out[3]) # 1/32, 384
+        dec2 = self.decoder4(dec3, enc3) # 1/16, 192
+        dec1 = self.decoder3(dec2, enc2) # 1/8, 96
+        dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
         return {'0': dec0, '1': dec1}
 
