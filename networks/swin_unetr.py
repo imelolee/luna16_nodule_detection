@@ -296,56 +296,6 @@ class SwinUNETR(nn.Module):
         self.out2 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
 
 
-    def load_from(self, weights):
-
-        with torch.no_grad():
-            self.swinViT.patch_embed.proj.weight.copy_(weights["state_dict"]["module.patch_embed.proj.weight"])
-            self.swinViT.patch_embed.proj.bias.copy_(weights["state_dict"]["module.patch_embed.proj.bias"])
-            for bname, block in self.swinViT.layers1[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers1")
-            self.swinViT.layers1[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers1[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers1[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers2[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers2")
-            self.swinViT.layers2[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers2[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers2[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers3[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers3")
-            self.swinViT.layers3[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers3[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers3[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers4[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers4")
-            self.swinViT.layers4[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers4[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers4[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.norm.bias"]
-            )
-
     def forward(self, x_in):
         x_in = self.preBlock(x_in)
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
@@ -680,39 +630,6 @@ class SwinTransformerBlock(nn.Module):
     def forward_part2(self, x):
         return self.drop_path(self.mlp(self.norm2(x)))
 
-    def load_from(self, weights, n_block, layer):
-        root = f"module.{layer}.0.blocks.{n_block}."
-        block_names = [
-            "norm1.weight",
-            "norm1.bias",
-            "attn.relative_position_bias_table",
-            "attn.relative_position_index",
-            "attn.qkv.weight",
-            "attn.qkv.bias",
-            "attn.proj.weight",
-            "attn.proj.bias",
-            "norm2.weight",
-            "norm2.bias",
-            "mlp.fc1.weight",
-            "mlp.fc1.bias",
-            "mlp.fc2.weight",
-            "mlp.fc2.bias",
-        ]
-        with torch.no_grad():
-            self.norm1.weight.copy_(weights["state_dict"][root + block_names[0]])
-            self.norm1.bias.copy_(weights["state_dict"][root + block_names[1]])
-            self.attn.relative_position_bias_table.copy_(weights["state_dict"][root + block_names[2]])
-            self.attn.relative_position_index.copy_(weights["state_dict"][root + block_names[3]])  # type: ignore
-            self.attn.qkv.weight.copy_(weights["state_dict"][root + block_names[4]])
-            self.attn.qkv.bias.copy_(weights["state_dict"][root + block_names[5]])
-            self.attn.proj.weight.copy_(weights["state_dict"][root + block_names[6]])
-            self.attn.proj.bias.copy_(weights["state_dict"][root + block_names[7]])
-            self.norm2.weight.copy_(weights["state_dict"][root + block_names[8]])
-            self.norm2.bias.copy_(weights["state_dict"][root + block_names[9]])
-            self.mlp.linear1.weight.copy_(weights["state_dict"][root + block_names[10]])
-            self.mlp.linear1.bias.copy_(weights["state_dict"][root + block_names[11]])
-            self.mlp.linear2.weight.copy_(weights["state_dict"][root + block_names[12]])
-            self.mlp.linear2.bias.copy_(weights["state_dict"][root + block_names[13]])
 
     def forward(self, x, mask_matrix):
         shortcut = x
