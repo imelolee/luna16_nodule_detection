@@ -34,7 +34,8 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.ticnet.feature_net import FeatureNet
+# from networks.ticnet.feature_net import FeatureNet
+from networks.swin_unetr import SwinUNETR
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
 from monai.data.utils import no_collation
@@ -46,7 +47,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -165,20 +166,29 @@ def main():
     )
 
     # 2) build network
-    backbone = FeatureNet(
-        in_channels = 1,
-        out_channels = 128,
-        hidden_dim = 64,
-        position_embedding = 'sine',  
-        dropout = 0.1,
-        nheads = 8,
-        num_queries = 512,
-        dim_feedforward = 256,
-        num_encoder_layers = 6,
-        num_decoder_layers = 6,
-        normalize_before = None,
-        return_intermediate_dec =True       
-    );
+    # backbone = FeatureNet(
+    #     in_channels = 1,
+    #     out_channels = 128,
+    #     hidden_dim = 64,
+    #     position_embedding = 'sine',  
+    #     dropout = 0.1,
+    #     nheads = 8,
+    #     num_queries = 512,
+    #     dim_feedforward = 256,
+    #     num_encoder_layers = 6,
+    #     num_decoder_layers = 6,
+    #     normalize_before = None,
+    #     return_intermediate_dec =True       
+    # );
+
+    backbone = SwinUNETR(
+        img_size=(128, 128, 128),
+        in_channels=1,
+        out_channels=128,
+        feature_size=48,
+        use_checkpoint=True,
+        block_inplanes=args.block_inplanes
+    )
 
     feature_extractor = fpn_feature_extractor(
         backbone=backbone,
@@ -329,9 +339,10 @@ def main():
                 for val_data in val_loader:
                     # if all val_data_i["image"] smaller than args.val_patch_size, no need to use inferer
                     # otherwise, need inferer to handle large input images.
-                    use_inferer = not all(
-                        [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
-                    )
+                    # use_inferer = not all(
+                    #     [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
+                    # )
+                    use_inferer = True
                     val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
 
                     if amp:

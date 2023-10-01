@@ -24,9 +24,6 @@ from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, Une
 from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
-
-from monai.networks.blocks.feature_pyramid_network import ExtraFPNBlock, FeaturePyramidNetwork, LastLevelMaxPool
-
 rearrange, _ = optional_import("einops", name="rearrange")
 
 __all__ = [
@@ -49,21 +46,27 @@ class ResBlock3d(nn.Module):
             self, 
             n_in: int = 1, 
             n_out: int = 24, 
-            stride: int =1 
+            stride: int = 1,
+            d_model: int = 64,
         ):
 
         super(ResBlock3d, self).__init__()
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        self.norm1 = nn.LayerNorm(d_model)
+
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
+        self.norm2 = nn.LayerNorm(d_model)
 
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
-                nn.BatchNorm3d(n_out, momentum=0.1))
+                # nn.BatchNorm3d(n_out, momentum=0.1),
+                nn.LayerNorm(d_model),
+            )
         else:
             self.shortcut = None
 
@@ -72,10 +75,10 @@ class ResBlock3d(nn.Module):
         if self.shortcut is not None:
             residual = self.shortcut(x)
         out = self.conv1(x)
-        out = self.bn1(out)
+        out = self.norm1(out)
         out = self.relu(out)
         out = self.conv2(out)
-        out = self.bn2(out)
+        out = self.norm2(out)
 
         out += residual
         out = self.relu(out)
@@ -170,10 +173,18 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
-            ResBlock3d(n_in=feature_size, n_out=feature_size*2, stride=1),
-            ResBlock3d(n_in=feature_size*2, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
         )
+
+        # self.preBlock = nn.Sequential(
+        #     ResBlock3d(n_in=in_channels, n_out=feature_size, stride=1),
+        #     ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+        #     nn.MaxPool3d(kernel_size=2),
+        # )
+
+        
 
         self.swinViT = SwinTransformer(
             in_chans=feature_size,
@@ -986,76 +997,3 @@ class SwinTransformer(nn.Module):
         x4 = self.layers4[0](x3.contiguous())
         x4_out = self.proj_out(x4, normalize)
         return [x0_out, x1_out, x2_out, x3_out, x4_out]
-    
-
-
-class BackboneWithFPN(nn.Module):
-    """
-    Adds an FPN on top of a model.
-    Internally, it uses torchvision.models._utils.IntermediateLayerGetter to
-    extract a submodel that returns the feature maps specified in return_layers.
-    The same limitations of IntermediateLayerGetter apply here.
-
-    Same code as https://github.com/pytorch/vision/blob/release/0.12/torchvision/models/detection/backbone_utils.py
-    Except that this class uses spatial_dims
-
-    Args:
-        backbone: backbone network
-        return_layers: a dict containing the names
-            of the modules for which the activations will be returned as
-            the key of the dict, and the value of the dict is the name
-            of the returned activation (which the user can specify).
-        in_channels_list: number of channels for each feature map
-            that is returned, in the order they are present in the OrderedDict
-        out_channels: number of channels in the FPN.
-        spatial_dims: 2D or 3D images
-    """
-
-    def __init__(
-        self,
-        backbone: nn.Module,
-        in_channels_list: List[int],
-        out_channels: int,
-        spatial_dims: Union[int, None] = None,
-        extra_blocks: Optional[ExtraFPNBlock] = None,
-    ) -> None:
-        super().__init__()
-
-        # if spatial_dims is not specified, try to find it from backbone.
-        if spatial_dims is None:
-            if hasattr(backbone, "spatial_dims") and isinstance(backbone.spatial_dims, int):
-                spatial_dims = backbone.spatial_dims
-            elif isinstance(backbone.conv1, nn.Conv2d):
-                spatial_dims = 2
-            elif isinstance(backbone.conv1, nn.Conv3d):
-                spatial_dims = 3
-            else:
-                raise ValueError("Could not find spatial_dims of backbone, please specify it.")
-
-        if extra_blocks is None:
-            extra_blocks = LastLevelMaxPool(spatial_dims)
-
-        self.body = backbone
-        self.fpn = FeaturePyramidNetwork(
-            spatial_dims=spatial_dims,
-            in_channels_list=in_channels_list,
-            out_channels=out_channels,
-            extra_blocks=extra_blocks,
-        )
-        self.out_channels = out_channels
-
-    def forward(self, x: Tensor) -> Dict[str, Tensor]:
-        """
-        Computes the resulted feature maps of the network.
-
-        Args:
-            x: input images
-
-        Returns:
-            feature maps after FPN layers. They are ordered from highest resolution first.
-        """
-        x = self.body(x)  # backbone
-        y: Dict[str, Tensor] = self.fpn(x)  # FPN
-        return y
-
-
