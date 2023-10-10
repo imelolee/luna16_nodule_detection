@@ -55,17 +55,21 @@ class ResBlock3d(nn.Module):
                                stride=stride, padding=1)
         # self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
         self.norm1 = nn.LayerNorm(d_model)
+        # self.norm1 = nn.GroupNorm(2, n_out)
+
 
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
         # self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
         self.norm2 = nn.LayerNorm(d_model)
+        # self.norm2 = nn.GroupNorm(2, n_out)
 
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
                 # nn.BatchNorm3d(n_out, momentum=0.1),
                 nn.LayerNorm(d_model),
+                # nn.GroupNorm(2, n_out),
             )
         else:
             self.shortcut = None
