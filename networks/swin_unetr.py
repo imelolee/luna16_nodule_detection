@@ -53,22 +53,22 @@ class ResBlock3d(nn.Module):
         super(ResBlock3d, self).__init__()
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
-        # self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
-        self.norm1 = nn.LayerNorm(d_model)
+        self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm1 = nn.LayerNorm(d_model)
         # self.norm1 = nn.GroupNorm(2, n_out)
 
 
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
-        # self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm2 = nn.LayerNorm(d_model)
         # self.norm2 = nn.GroupNorm(2, n_out)
 
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
-                # nn.BatchNorm3d(n_out, momentum=0.1),
-                nn.LayerNorm(d_model),
+                nn.BatchNorm3d(n_out, momentum=0.1),
+                # nn.LayerNorm(d_model),
                 # nn.GroupNorm(2, n_out),
             )
         else:
@@ -324,7 +324,7 @@ class SwinUNETR(nn.Module):
         dec1 = self.decoder3(dec2, enc2) # 1/8, 96
         dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
-        return {'0': dec0, '1': dec1}
+        return {'0': dec0, '1': dec1, '2': dec2}
 
 def window_partition(x, window_size):
     """window partition operation based on: "Liu et al.,
