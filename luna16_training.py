@@ -34,8 +34,8 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-# from networks.ticnet.feature_net import FeatureNet
-# from networks.swin_unetr import SwinUNETR
+from networks.ticnet.feature_net import FeatureNet
+from networks.swin_unetr import SwinUNETR
 from networks.unetr import UNETR
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
@@ -192,11 +192,20 @@ def main():
     # )
 
     backbone = UNETR(
-        img_size=(128, 128, 128),
         in_channels=1,
         out_channels=128,
+        img_size=(64, 64, 64),
         feature_size=48,
+        hidden_size=768,
+        mlp_dim=3072,
+        num_heads=12,
+        pos_embed='perceptron',
+        norm_name='instance',
+        conv_block=True,
+        res_block=True,
+        dropout_rate=0.0,
     )
+
 
     feature_extractor = fpn_feature_extractor(
         backbone=backbone,
@@ -347,10 +356,10 @@ def main():
                 for val_data in val_loader:
                     # if all val_data_i["image"] smaller than args.val_patch_size, no need to use inferer
                     # otherwise, need inferer to handle large input images.
-                    use_inferer = not all(
-                        [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
-                    )
-                    # use_inferer = True
+                    # use_inferer = not all(
+                    #     [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
+                    # )
+                    use_inferer = True
                     val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
 
                     if amp:
