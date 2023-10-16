@@ -24,13 +24,11 @@ from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, Une
 from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
-
-from monai.networks.blocks.feature_pyramid_network import ExtraFPNBlock, FeaturePyramidNetwork, LastLevelMaxPool
+from networks.pre_block import ResBlock3d
 
 rearrange, _ = optional_import("einops", name="rearrange")
 
 __all__ = [
-    "ResBlock3d",
     "SwinUNETR",
     "window_partition",
     "window_reverse",
@@ -43,43 +41,6 @@ __all__ = [
     "SwinTransformer",
 ]
 
-
-class ResBlock3d(nn.Module):
-    def __init__(
-            self, 
-            n_in: int = 1, 
-            n_out: int = 24, 
-            stride: int =1 
-        ):
-
-        super(ResBlock3d, self).__init__()
-        self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
-                               stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm3d(n_out, momentum=0.1)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(n_out, momentum=0.1)
-
-        if stride != 1 or n_out != n_in:
-            self.shortcut = nn.Sequential(
-                nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
-                nn.BatchNorm3d(n_out, momentum=0.1))
-        else:
-            self.shortcut = None
-
-    def forward(self, x):
-        residual = x
-        if self.shortcut is not None:
-            residual = self.shortcut(x)
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        out += residual
-        out = self.relu(out)
-        return out
 
 
 class SwinUNETR(nn.Module):
@@ -170,10 +131,18 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
-            ResBlock3d(n_in=feature_size, n_out=feature_size*2, stride=1),
-            ResBlock3d(n_in=feature_size*2, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
         )
+
+        # self.preBlock = nn.Sequential(
+        #     ResBlock3d(n_in=in_channels, n_out=feature_size, stride=1),
+        #     ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+        #     nn.MaxPool3d(kernel_size=2),
+        # )
+
+        
 
         self.swinViT = SwinTransformer(
             in_chans=feature_size,
@@ -296,70 +265,20 @@ class SwinUNETR(nn.Module):
         self.out2 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
 
 
-    def load_from(self, weights):
-
-        with torch.no_grad():
-            self.swinViT.patch_embed.proj.weight.copy_(weights["state_dict"]["module.patch_embed.proj.weight"])
-            self.swinViT.patch_embed.proj.bias.copy_(weights["state_dict"]["module.patch_embed.proj.bias"])
-            for bname, block in self.swinViT.layers1[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers1")
-            self.swinViT.layers1[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers1[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers1[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers1.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers2[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers2")
-            self.swinViT.layers2[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers2[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers2[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers2.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers3[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers3")
-            self.swinViT.layers3[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers3[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers3[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers3.0.downsample.norm.bias"]
-            )
-            for bname, block in self.swinViT.layers4[0].blocks.named_children():
-                block.load_from(weights, n_block=bname, layer="layers4")
-            self.swinViT.layers4[0].downsample.reduction.weight.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.reduction.weight"]
-            )
-            self.swinViT.layers4[0].downsample.norm.weight.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.norm.weight"]
-            )
-            self.swinViT.layers4[0].downsample.norm.bias.copy_(
-                weights["state_dict"]["module.layers4.0.downsample.norm.bias"]
-            )
-
     def forward(self, x_in):
-        x_in = self.preBlock(x_in)
+        x_in = self.preBlock(x_in) # 1/2
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
-        enc1 = self.encoder2(hidden_states_out[0]) # 1/2
-        enc2 = self.encoder3(hidden_states_out[1]) # 1/4
-        enc3 = self.encoder4(hidden_states_out[2]) # 1/8
-        dec4 = self.encoder10(hidden_states_out[4]) # 1/32
-        dec3 = self.decoder5(dec4, hidden_states_out[3]) # 1/16
-        dec2 = self.decoder4(dec3, enc3) # 1/8, 192
-        dec1 = self.decoder3(dec2, enc2) # 1/4, 96
-        dec0 = self.decoder2(dec1, enc1) # 1/2, 48
+        enc1 = self.encoder2(hidden_states_out[0]) # 1/4, 48
+        enc2 = self.encoder3(hidden_states_out[1]) # 1/8, 96
+        enc3 = self.encoder4(hidden_states_out[2]) # 1/16, 192
+        dec4 = self.encoder10(hidden_states_out[4]) 
+        dec3 = self.decoder5(dec4, hidden_states_out[3]) # 1/32, 384
+        dec2 = self.decoder4(dec3, enc3) # 1/16, 192
+        dec1 = self.decoder3(dec2, enc2) # 1/8, 96
+        dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
-        return {'0': dec0, '1': dec1}
+        return {'0': dec0, '1': dec1, '2': dec2}
 
 def window_partition(x, window_size):
     """window partition operation based on: "Liu et al.,
@@ -680,39 +599,6 @@ class SwinTransformerBlock(nn.Module):
     def forward_part2(self, x):
         return self.drop_path(self.mlp(self.norm2(x)))
 
-    def load_from(self, weights, n_block, layer):
-        root = f"module.{layer}.0.blocks.{n_block}."
-        block_names = [
-            "norm1.weight",
-            "norm1.bias",
-            "attn.relative_position_bias_table",
-            "attn.relative_position_index",
-            "attn.qkv.weight",
-            "attn.qkv.bias",
-            "attn.proj.weight",
-            "attn.proj.bias",
-            "norm2.weight",
-            "norm2.bias",
-            "mlp.fc1.weight",
-            "mlp.fc1.bias",
-            "mlp.fc2.weight",
-            "mlp.fc2.bias",
-        ]
-        with torch.no_grad():
-            self.norm1.weight.copy_(weights["state_dict"][root + block_names[0]])
-            self.norm1.bias.copy_(weights["state_dict"][root + block_names[1]])
-            self.attn.relative_position_bias_table.copy_(weights["state_dict"][root + block_names[2]])
-            self.attn.relative_position_index.copy_(weights["state_dict"][root + block_names[3]])  # type: ignore
-            self.attn.qkv.weight.copy_(weights["state_dict"][root + block_names[4]])
-            self.attn.qkv.bias.copy_(weights["state_dict"][root + block_names[5]])
-            self.attn.proj.weight.copy_(weights["state_dict"][root + block_names[6]])
-            self.attn.proj.bias.copy_(weights["state_dict"][root + block_names[7]])
-            self.norm2.weight.copy_(weights["state_dict"][root + block_names[8]])
-            self.norm2.bias.copy_(weights["state_dict"][root + block_names[9]])
-            self.mlp.linear1.weight.copy_(weights["state_dict"][root + block_names[10]])
-            self.mlp.linear1.bias.copy_(weights["state_dict"][root + block_names[11]])
-            self.mlp.linear2.weight.copy_(weights["state_dict"][root + block_names[12]])
-            self.mlp.linear2.bias.copy_(weights["state_dict"][root + block_names[13]])
 
     def forward(self, x, mask_matrix):
         shortcut = x
@@ -1057,7 +943,7 @@ class SwinTransformer(nn.Module):
         return x
 
     def forward(self, x, normalize=True):
-        x0 = self.patch_embed(x)
+        x0 = self.patch_embed(x) # 48, 1/4
         x0 = self.pos_drop(x0)
         x0_out = self.proj_out(x0, normalize)
         x1 = self.layers1[0](x0.contiguous())
@@ -1069,76 +955,3 @@ class SwinTransformer(nn.Module):
         x4 = self.layers4[0](x3.contiguous())
         x4_out = self.proj_out(x4, normalize)
         return [x0_out, x1_out, x2_out, x3_out, x4_out]
-    
-
-
-class BackboneWithFPN(nn.Module):
-    """
-    Adds an FPN on top of a model.
-    Internally, it uses torchvision.models._utils.IntermediateLayerGetter to
-    extract a submodel that returns the feature maps specified in return_layers.
-    The same limitations of IntermediateLayerGetter apply here.
-
-    Same code as https://github.com/pytorch/vision/blob/release/0.12/torchvision/models/detection/backbone_utils.py
-    Except that this class uses spatial_dims
-
-    Args:
-        backbone: backbone network
-        return_layers: a dict containing the names
-            of the modules for which the activations will be returned as
-            the key of the dict, and the value of the dict is the name
-            of the returned activation (which the user can specify).
-        in_channels_list: number of channels for each feature map
-            that is returned, in the order they are present in the OrderedDict
-        out_channels: number of channels in the FPN.
-        spatial_dims: 2D or 3D images
-    """
-
-    def __init__(
-        self,
-        backbone: nn.Module,
-        in_channels_list: List[int],
-        out_channels: int,
-        spatial_dims: Union[int, None] = None,
-        extra_blocks: Optional[ExtraFPNBlock] = None,
-    ) -> None:
-        super().__init__()
-
-        # if spatial_dims is not specified, try to find it from backbone.
-        if spatial_dims is None:
-            if hasattr(backbone, "spatial_dims") and isinstance(backbone.spatial_dims, int):
-                spatial_dims = backbone.spatial_dims
-            elif isinstance(backbone.conv1, nn.Conv2d):
-                spatial_dims = 2
-            elif isinstance(backbone.conv1, nn.Conv3d):
-                spatial_dims = 3
-            else:
-                raise ValueError("Could not find spatial_dims of backbone, please specify it.")
-
-        if extra_blocks is None:
-            extra_blocks = LastLevelMaxPool(spatial_dims)
-
-        self.body = backbone
-        self.fpn = FeaturePyramidNetwork(
-            spatial_dims=spatial_dims,
-            in_channels_list=in_channels_list,
-            out_channels=out_channels,
-            extra_blocks=extra_blocks,
-        )
-        self.out_channels = out_channels
-
-    def forward(self, x: Tensor) -> Dict[str, Tensor]:
-        """
-        Computes the resulted feature maps of the network.
-
-        Args:
-            x: input images
-
-        Returns:
-            feature maps after FPN layers. They are ordered from highest resolution first.
-        """
-        x = self.body(x)  # backbone
-        y: Dict[str, Tensor] = self.fpn(x)  # FPN
-        return y
-
-

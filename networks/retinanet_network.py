@@ -43,7 +43,7 @@ from typing import Callable, Dict, List, Sequence, Union
 import torch
 from torch import Tensor, nn
 
-from networks.swin_unetr import BackboneWithFPN
+from networks.build_fpn import BackboneWithFPN
 
 from monai.networks.layers.factories import Conv
 from monai.networks.nets import resnet
@@ -360,6 +360,6 @@ def fpn_feature_extractor(
 
 
     feature_extractor = BackboneWithFPN(
-        backbone, in_channels_list=[48, 96], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
+        backbone, in_channels_list=[192, 384, 768], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
     )
     return feature_extractor
