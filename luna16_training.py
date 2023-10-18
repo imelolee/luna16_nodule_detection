@@ -48,7 +48,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -192,20 +192,13 @@ def main():
     # )
 
     backbone = UNETR(
+        img_size=(128, 128, 128),
         in_channels=1,
         out_channels=128,
-        img_size=(64, 64, 64),
         feature_size=48,
-        hidden_size=768,
-        mlp_dim=3072,
-        num_heads=12,
-        pos_embed='perceptron',
-        norm_name='instance',
-        conv_block=True,
-        res_block=True,
-        dropout_rate=0.0,
+        use_checkpoint=True,
+        block_inplanes=args.block_inplanes
     )
-
 
     feature_extractor = fpn_feature_extractor(
         backbone=backbone,
