@@ -57,8 +57,8 @@ class SwinUNETR(nn.Module):
         in_channels: int,
         out_channels: int,
         depths: Sequence[int] = (2, 2, 2, 2),
-        num_heads: Sequence[int] = (3, 6, 12, 24),
-        feature_size: int = 24,
+        num_heads: Sequence[int] = (4, 8, 16, 32),
+        feature_size: int = 48,
         norm_name: Union[Tuple, str] = "instance",
         drop_rate: float = 0.0,
         attn_drop_rate: float = 0.0,
@@ -132,9 +132,9 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2, d_model=int(img_size[0]/2)),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
         )
 
         # self.preBlock = nn.Sequential(

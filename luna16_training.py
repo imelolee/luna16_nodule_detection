@@ -48,7 +48,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -70,10 +70,6 @@ def main():
     set_determinism(seed=0)
 
     amp = True
-    if amp:
-        compute_dtype = torch.float16
-    else:
-        compute_dtype = torch.float32
 
     monai.config.print_config()
     torch.backends.cudnn.benchmark = True
@@ -182,7 +178,25 @@ def main():
     #     return_intermediate_dec =True       
     # );
 
-    # backbone = SwinUNETR(
+    backbone = SwinUNETR(
+        img_size=(128, 128, 128),
+        in_channels=1,
+        out_channels=128,
+        depths=(2, 2, 2, 2),
+        num_heads=(3, 6, 12, 24),
+        feature_size=48,
+        norm_name="instance",
+        drop_rate=0.1,
+        attn_drop_rate=0.1,
+        dropout_path_rate=0.1,
+        normalize=True,
+        use_checkpoint=False,
+        spatial_dims=3,
+        downsample="merging",
+        block_inplanes=args.block_inplanes
+    )
+
+    # backbone = UNETR(
     #     img_size=(128, 128, 128),
     #     in_channels=1,
     #     out_channels=128,
@@ -190,15 +204,6 @@ def main():
     #     use_checkpoint=True,
     #     block_inplanes=args.block_inplanes
     # )
-
-    backbone = UNETR(
-        img_size=(128, 128, 128),
-        in_channels=1,
-        out_channels=128,
-        feature_size=48,
-        use_checkpoint=True,
-        block_inplanes=args.block_inplanes
-    )
 
     feature_extractor = fpn_feature_extractor(
         backbone=backbone,
@@ -267,7 +272,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 300
+    max_epochs = 200
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
     for epoch in range(max_epochs):
@@ -349,10 +354,10 @@ def main():
                 for val_data in val_loader:
                     # if all val_data_i["image"] smaller than args.val_patch_size, no need to use inferer
                     # otherwise, need inferer to handle large input images.
-                    # use_inferer = not all(
-                    #     [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
-                    # )
-                    use_inferer = True
+                    use_inferer = not all(
+                        [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
+                    )
+                    # use_inferer = True
                     val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
 
                     if amp:

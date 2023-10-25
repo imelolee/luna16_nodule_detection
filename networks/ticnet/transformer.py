@@ -27,7 +27,6 @@ class Transformer(nn.Module):
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                           return_intermediate=return_intermediate_dec)
         self._reset_parameters()
-        self.query_embed = nn.Embedding(num_queries, d_model)
         self.d_model = d_model
         self.nhead = nhead
 

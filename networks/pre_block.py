@@ -13,6 +13,8 @@ class ResBlock3d(nn.Module):
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
         self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # TODO: nn.InstanceNorm3d
+        # self.norm1 = nn.InstanceNorm3d(n_out)
         # self.norm1 = nn.LayerNorm(d_model)
         # self.norm1 = nn.GroupNorm(2, n_out)
 

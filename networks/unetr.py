@@ -7,7 +7,9 @@ from torch.nn import LayerNorm
 
 from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, UnetrUpBlock
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
-from monai.networks.blocks.mlp import MLPBlock
+from monai.networks.layers import DropPath
+
+from monai.networks.blocks import MLPBlock as Mlp
 from monai.networks.blocks.selfattention import SABlock
 
 from networks.pre_block import ResBlock3d
@@ -76,7 +78,6 @@ class UNETR(nn.Module):
         self.ViT = Transformer(
             in_chans=feature_size,
             embed_dim=feature_size,
-            img_dim=64,
             patch_size=patch_size,
             depths=depths,
             num_heads=num_heads,
@@ -90,6 +91,7 @@ class UNETR(nn.Module):
             spatial_dims=spatial_dims,
             downsample=look_up_option(downsample, MERGING_MODE) if isinstance(downsample, str) else downsample,
         )
+
         self.encoder1 = UnetrBasicBlock(
             spatial_dims=spatial_dims,
             in_channels=in_channels,
@@ -207,36 +209,79 @@ class UNETR(nn.Module):
         dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
         return {'0': dec0, '1': dec1, '2': dec2}
+    
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        drop: float = 0.0,
+        attn_drop: float = 0.0,
+        drop_path: float = 0.0,
+        act_layer: str = "GELU",
+        norm_layer: Type[LayerNorm] = nn.LayerNorm,
+        use_checkpoint: bool = False,
+    ) -> None:
+        
+
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+        self.use_checkpoint = use_checkpoint
+        self.norm1 = norm_layer(dim)
+        self.attn = SABlock(dim, num_heads, dropout_rate=drop, qkv_bias=qkv_bias)
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(hidden_size=dim, mlp_dim=mlp_hidden_dim, act=act_layer, dropout_rate=drop, dropout_mode="swin")
+
+    def forward(self, x):
+        x = self.norm1(x)
+        x = rearrange(x, "n d h w c -> n (d h w) c")
+        x_attn = self.attn(x)
+        x = self.norm2(x+x_attn)
+        x = self.mlp(x)
+        x_out = self.drop_path(x)
+        return x_out
+
 
 
 
 class BasicLayer(nn.Module):
-
+   
     def __init__(
         self,
         dim: int,
-        mlp_dim: int,
         depth: int,
         num_heads: int,
+        drop_path: list,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = False,
         drop: float = 0.0,
         attn_drop: float = 0.0,
         norm_layer: Type[LayerNorm] = nn.LayerNorm,
         downsample: Optional[nn.Module] = None,
         use_checkpoint: bool = False,
     ) -> None:
-        
         super().__init__()
-       
         self.depth = depth
         self.use_checkpoint = use_checkpoint
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    hidden_size=dim, 
-                    mlp_dim=mlp_dim, 
-                    num_heads=num_heads, 
-                    dropout_rate=drop, 
-                    qkv_bias= False
+                    dim=dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    drop=drop,
+                    attn_drop=attn_drop,
+                    drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                    norm_layer=norm_layer,
+                    use_checkpoint=use_checkpoint,
                 )
                 for i in range(depth)
             ]
@@ -249,9 +294,7 @@ class BasicLayer(nn.Module):
         x_shape = x.size()
         if len(x_shape) == 5:
             b, c, d, h, w = x_shape
-
-            x = rearrange(x, "b c d h w -> b (d h w) c")
-           
+            x = rearrange(x, "b c d h w -> b d h w c")
             for blk in self.blocks:
                 x = blk(x)
             x = x.view(b, d, h, w, -1)
@@ -272,13 +315,13 @@ class BasicLayer(nn.Module):
         return x
 
 
+
 class Transformer(nn.Module):
 
     def __init__(
         self,
         in_chans: int,
         embed_dim: int,
-        img_dim: int,
         patch_size: Sequence[int],
         depths: Sequence[int],
         num_heads: Sequence[int],
@@ -315,10 +358,12 @@ class Transformer(nn.Module):
         down_sample_mod = look_up_option(downsample, MERGING_MODE) if isinstance(downsample, str) else downsample
         for i_layer in range(self.num_layers):
             layer = BasicLayer(
-                dim=int((img_dim/(2**(i_layer+1)))**3),
-                mlp_dim=int(embed_dim * 2**i_layer),
+                dim=int(embed_dim * 2**i_layer),
                 depth=depths[i_layer],
                 num_heads=num_heads[i_layer],
+                drop_path=dpr[sum(depths[:i_layer]) : sum(depths[: i_layer + 1])],
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
                 norm_layer=norm_layer,
@@ -351,7 +396,6 @@ class Transformer(nn.Module):
         return x
 
     def forward(self, x, normalize=True):
-        bs, c, d, h, w = x.shape
         x0 = self.patch_embed(x) # 48, 1/4
         x0 = self.pos_drop(x0) # 48, 1/4
         x0_out = self.proj_out(x0, normalize)
@@ -365,41 +409,3 @@ class Transformer(nn.Module):
         x4_out = self.proj_out(x4, normalize)
         return [x0_out, x1_out, x2_out, x3_out, x4_out]
 
-
-
-class TransformerBlock(nn.Module):
-    """
-    A transformer block, based on: "Dosovitskiy et al.,
-    An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale <https://arxiv.org/abs/2010.11929>"
-    """
-
-    def __init__(
-        self, hidden_size: int, mlp_dim: int, num_heads: int, dropout_rate: float = 0.0, qkv_bias: bool = False
-    ) -> None:
-        """
-        Args:
-            hidden_size: dimension of hidden layer.
-            mlp_dim: dimension of feedforward layer.
-            num_heads: number of attention heads.
-            dropout_rate: faction of the input units to drop.
-            qkv_bias: apply bias term for the qkv linear layer
-
-        """
-
-        super().__init__()
-
-        if not (0 <= dropout_rate <= 1):
-            raise ValueError("dropout_rate should be between 0 and 1.")
-
-        if hidden_size % num_heads != 0:
-            raise ValueError("hidden_size should be divisible by num_heads.")
-
-        self.mlp = MLPBlock(hidden_size, mlp_dim, dropout_rate)
-        self.norm1 = nn.LayerNorm(hidden_size)
-        self.attn = SABlock(hidden_size, num_heads, dropout_rate, qkv_bias)
-        self.norm2 = nn.LayerNorm(hidden_size)
-
-    def forward(self, x):
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
