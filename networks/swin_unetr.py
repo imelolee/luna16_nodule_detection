@@ -279,7 +279,7 @@ class SwinUNETR(nn.Module):
         dec1 = self.decoder3(dec2, enc2) # 1/8, 96
         dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
-        return {'0': dec0, '1': dec1, '2': dec2}
+        return {'0': dec0, '1': dec1}
 
 def window_partition(x, window_size):
     """window partition operation based on: "Liu et al.,
