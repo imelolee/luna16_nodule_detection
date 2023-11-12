@@ -27,7 +27,7 @@ from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")

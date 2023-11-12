@@ -76,6 +76,7 @@ class PatchMerging(PatchMergingV2):
         x5 = x[:, 0::2, 1::2, 0::2, :]
         x6 = x[:, 0::2, 0::2, 1::2, :]
         x7 = x[:, 1::2, 1::2, 1::2, :]
+       
         x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)
         x = self.norm(x)
         x = self.reduction(x)

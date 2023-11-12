@@ -34,7 +34,7 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.ticnet.feature_net import FeatureNet
+from networks.swin_ticnet.feature_net import FeatureNet
 from networks.swin_unetr import SwinUNETR
 from networks.unetr import UNETR
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
@@ -48,7 +48,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -163,39 +163,45 @@ def main():
         base_anchor_shapes=args.base_anchor_shapes,
     )
 
-    # 2) build network
-    # backbone = FeatureNet(
-    #     in_channels = 1,
-    #     out_channels = 128,
-    #     hidden_dim = 64,
-    #     position_embedding = 'sine',  
-    #     dropout = 0.1,
-    #     nheads = 8,
-    #     num_queries = 512,
-    #     dim_feedforward = 256,
-    #     num_encoder_layers = 6,
-    #     num_decoder_layers = 6,
-    #     normalize_before = None,
-    #     return_intermediate_dec =True       
-    # );
     if not resume_checkpoint:
-        backbone = SwinUNETR(
-            img_size=(128, 128, 128),
-            in_channels=1,
-            out_channels=128,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
-            feature_size=48,
-            norm_name="instance",
-            drop_rate=0.1,
-            attn_drop_rate=0.1,
-            dropout_path_rate=0.1,
-            normalize=True,
-            use_checkpoint=False,
-            spatial_dims=3,
-            downsample="merging",
-            block_inplanes=args.block_inplanes
+        # 2) build network
+        # backbone = FeatureNet(
+        #     in_channels = 1,
+        #     out_channels = 128,
+        #     hidden_dim = 64,
+        #     position_embedding = 'sine',  
+        #     dropout = 0.1,
+        #     nheads = 8,
+        #     num_queries = 512,
+        #     dim_feedforward = 256,
+        #     num_encoder_layers = 6,
+        #     num_decoder_layers = 6,
+        #     normalize_before = None,
+        #     return_intermediate_dec =True       
+        # )
+
+        backbone = FeatureNet(
+            in_channels = 1,
+            out_channels = 128, 
         )
+
+        # backbone = SwinUNETR(
+        #     img_size=(128, 128, 128),
+        #     in_channels=1,
+        #     out_channels=128,
+        #     depths=(2, 2, 2, 2),
+        #     num_heads=(3, 6, 12, 24),
+        #     feature_size=48,
+        #     norm_name="instance",
+        #     drop_rate=0.1,
+        #     attn_drop_rate=0.1,
+        #     dropout_path_rate=0.1,
+        #     normalize=True,
+        #     use_checkpoint=False,
+        #     spatial_dims=3,
+        #     downsample="merging",
+        #     block_inplanes=args.block_inplanes
+        # )
    
         # backbone = UNETR(
         #     img_size=(128, 128, 128),
@@ -318,7 +324,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 200
+    max_epochs = 300
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
     for epoch in range(max_epochs):
