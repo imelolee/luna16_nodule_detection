@@ -34,7 +34,7 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.ticnet.feature_net import FeatureNet
+from networks.swin_ticnet.feature_net import FeatureNet
 from networks.swin_unetr import SwinUNETR
 from networks.unetr import UNETR
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
@@ -48,7 +48,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -70,10 +70,7 @@ def main():
     set_determinism(seed=0)
 
     amp = True
-    if amp:
-        compute_dtype = torch.float16
-    else:
-        compute_dtype = torch.float32
+    resume_checkpoint = False
 
     monai.config.print_config()
     torch.backends.cudnn.benchmark = True
@@ -166,104 +163,157 @@ def main():
         base_anchor_shapes=args.base_anchor_shapes,
     )
 
-    # 2) build network
-    # backbone = FeatureNet(
-    #     in_channels = 1,
-    #     out_channels = 128,
-    #     hidden_dim = 64,
-    #     position_embedding = 'sine',  
-    #     dropout = 0.1,
-    #     nheads = 8,
-    #     num_queries = 512,
-    #     dim_feedforward = 256,
-    #     num_encoder_layers = 6,
-    #     num_decoder_layers = 6,
-    #     normalize_before = None,
-    #     return_intermediate_dec =True       
-    # );
+    if not resume_checkpoint:
+        # 2) build network
+        # backbone = FeatureNet(
+        #     in_channels = 1,
+        #     out_channels = 128,
+        #     hidden_dim = 64,
+        #     position_embedding = 'sine',  
+        #     dropout = 0.1,
+        #     nheads = 8,
+        #     num_queries = 512,
+        #     dim_feedforward = 256,
+        #     num_encoder_layers = 6,
+        #     num_decoder_layers = 6,
+        #     normalize_before = None,
+        #     return_intermediate_dec =True       
+        # )
 
-    # backbone = SwinUNETR(
-    #     img_size=(128, 128, 128),
-    #     in_channels=1,
-    #     out_channels=128,
-    #     feature_size=48,
-    #     use_checkpoint=True,
-    #     block_inplanes=args.block_inplanes
-    # )
+        backbone = FeatureNet(
+            in_channels = 1,
+            out_channels = 128, 
+        )
 
-    backbone = UNETR(
-        in_channels=1,
-        out_channels=128,
-        img_size=(64, 64, 64),
-        feature_size=48,
-        hidden_size=768,
-        mlp_dim=3072,
-        num_heads=12,
-        pos_embed='perceptron',
-        norm_name='instance',
-        conv_block=True,
-        res_block=True,
-        dropout_rate=0.0,
-    )
+        # backbone = SwinUNETR(
+        #     img_size=(128, 128, 128),
+        #     in_channels=1,
+        #     out_channels=128,
+        #     depths=(2, 2, 2, 2),
+        #     num_heads=(3, 6, 12, 24),
+        #     feature_size=48,
+        #     norm_name="instance",
+        #     drop_rate=0.1,
+        #     attn_drop_rate=0.1,
+        #     dropout_path_rate=0.1,
+        #     normalize=True,
+        #     use_checkpoint=False,
+        #     spatial_dims=3,
+        #     downsample="merging",
+        #     block_inplanes=args.block_inplanes
+        # )
+   
+        # backbone = UNETR(
+        #     img_size=(128, 128, 128),
+        #     in_channels=1,
+        #     out_channels=128,
+        #     feature_size=48,
+        #     use_checkpoint=True,
+        #     block_inplanes=args.block_inplanes
+        # )
 
+        feature_extractor = fpn_feature_extractor(
+            backbone=backbone,
+            spatial_dims=args.spatial_dims,
+        )
+        num_anchors = anchor_generator.num_anchors_per_location()[0]
+        size_divisible = [s * 2 * 2 ** max(args.returned_layers) for s in args.conv1_t_stride]
 
-    feature_extractor = fpn_feature_extractor(
-        backbone=backbone,
-        spatial_dims=args.spatial_dims,
-    )
-    num_anchors = anchor_generator.num_anchors_per_location()[0]
-    size_divisible = [s * 2 * 2 ** max(args.returned_layers) for s in args.conv1_t_stride]
+        net = RetinaNet(
+            spatial_dims=args.spatial_dims,
+            num_classes=len(args.fg_labels),
+            num_anchors=num_anchors,
+            feature_extractor=feature_extractor,
+            size_divisible=size_divisible,
+        )
 
-    net = RetinaNet(
-        spatial_dims=args.spatial_dims,
-        num_classes=len(args.fg_labels),
-        num_anchors=num_anchors,
-        feature_extractor=feature_extractor,
-        size_divisible=size_divisible,
-    )
+        # 3) build detector
+        detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
 
-    # 3) build detector
-    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
+        # set training components
+        detector.set_atss_matcher(num_candidates=4, center_in_gt=False)
+        detector.set_hard_negative_sampler(
+            batch_size_per_image=64,
+            positive_fraction=args.balanced_sampler_pos_fraction,
+            pool_size=20,
+            min_neg=16,
+        )
+        detector.set_target_keys(box_key="box", label_key="label")
 
-    # set training components
-    detector.set_atss_matcher(num_candidates=4, center_in_gt=False)
-    detector.set_hard_negative_sampler(
-        batch_size_per_image=64,
-        positive_fraction=args.balanced_sampler_pos_fraction,
-        pool_size=20,
-        min_neg=16,
-    )
-    detector.set_target_keys(box_key="box", label_key="label")
+        # set validation components
+        detector.set_box_selector_parameters(
+            score_thresh=args.score_thresh,
+            topk_candidates_per_level=1000,
+            nms_thresh=args.nms_thresh,
+            detections_per_img=100,
+        )
+        detector.set_sliding_window_inferer(
+            roi_size=args.val_patch_size,
+            overlap=0.25,
+            sw_batch_size=1,
+            mode="constant",
+            device="cpu",
+        )
 
-    # set validation components
-    detector.set_box_selector_parameters(
-        score_thresh=args.score_thresh,
-        topk_candidates_per_level=1000,
-        nms_thresh=args.nms_thresh,
-        detections_per_img=100,
-    )
-    detector.set_sliding_window_inferer(
-        roi_size=args.val_patch_size,
-        overlap=0.25,
-        sw_batch_size=1,
-        mode="constant",
-        device="cpu",
-    )
+        # 4. Initialize training
+        # initlize optimizer
+        optimizer = torch.optim.SGD(
+            detector.network.parameters(),
+            args.lr,
+            momentum=0.9,
+            weight_decay=3e-5,
+            nesterov=True,
+        )
+        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.1)
+        scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=10, after_scheduler=after_scheduler)
+        scaler = torch.cuda.amp.GradScaler() if amp else None
+        optimizer.zero_grad()
+        optimizer.step()
 
-    # 4. Initialize training
-    # initlize optimizer
-    optimizer = torch.optim.SGD(
-        detector.network.parameters(),
-        args.lr,
-        momentum=0.9,
-        weight_decay=3e-5,
-        nesterov=True,
-    )
-    after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.1)
-    scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=10, after_scheduler=after_scheduler)
-    scaler = torch.cuda.amp.GradScaler() if amp else None
-    optimizer.zero_grad()
-    optimizer.step()
+    else:
+        net = torch.load(env_dict["model_path"]).to(device)
+        print(f"Load model from {env_dict['model_path']}")
+
+         # 3) build detector
+        detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
+
+        # set training components
+        detector.set_atss_matcher(num_candidates=4, center_in_gt=False)
+        detector.set_hard_negative_sampler(
+            batch_size_per_image=64,
+            positive_fraction=args.balanced_sampler_pos_fraction,
+            pool_size=20,
+            min_neg=16,
+        )
+        detector.set_target_keys(box_key="box", label_key="label")
+
+        # set validation components
+        detector.set_box_selector_parameters(
+            score_thresh=args.score_thresh,
+            topk_candidates_per_level=1000,
+            nms_thresh=args.nms_thresh,
+            detections_per_img=100,
+        )
+        detector.set_sliding_window_inferer(
+            roi_size=args.val_patch_size,
+            overlap=0.25,
+            sw_batch_size=1,
+            mode="constant",
+            device="cpu",
+        )
+
+        # 4. Initialize training
+        # initlize optimizer
+        optimizer = torch.optim.SGD(
+            detector.network.parameters(),
+            0.001,
+            momentum=0.9,
+            weight_decay=3e-5,
+            nesterov=True,
+        )
+        scaler = torch.cuda.amp.GradScaler() if amp else None
+        optimizer.zero_grad()
+        optimizer.step()
 
     # initialize tensorboard writer
     tensorboard_writer = SummaryWriter(args.tfevent_path)
@@ -287,7 +337,8 @@ def main():
         epoch_box_reg_loss = 0
         step = 0
         start_time = time.time()
-        scheduler_warmup.step()
+        if not resume_checkpoint:
+            scheduler_warmup.step()
         # Training
         for batch_data in train_loader:
             step += 1
@@ -356,10 +407,10 @@ def main():
                 for val_data in val_loader:
                     # if all val_data_i["image"] smaller than args.val_patch_size, no need to use inferer
                     # otherwise, need inferer to handle large input images.
-                    # use_inferer = not all(
-                    #     [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
-                    # )
-                    use_inferer = True
+                    use_inferer = not all(
+                        [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
+                    )
+                    # use_inferer = True
                     val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
 
                     if amp:

@@ -13,6 +13,7 @@ class ResBlock3d(nn.Module):
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
         self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm1 = nn.InstanceNorm3d(n_out)
         # self.norm1 = nn.LayerNorm(d_model)
         # self.norm1 = nn.GroupNorm(2, n_out)
 
@@ -20,6 +21,7 @@ class ResBlock3d(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
         self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
+        # self.norm2 = nn.InstanceNorm3d(n_out)
         # self.norm2 = nn.LayerNorm(d_model)
         # self.norm2 = nn.GroupNorm(2, n_out)
 
@@ -27,6 +29,7 @@ class ResBlock3d(nn.Module):
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
                 nn.BatchNorm3d(n_out, momentum=0.1),
+                # nn.InstanceNorm3d(n_out)
                 # nn.LayerNorm(d_model),
                 # nn.GroupNorm(2, n_out),
             )

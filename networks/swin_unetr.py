@@ -9,12 +9,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import itertools
-from typing import Optional, Sequence, Tuple, Type, Union, Dict, List
+
+from typing import Optional, Sequence, Tuple, Type, Union
 
 import numpy as np
 import torch
-from torch import Tensor, nn
+from torch import nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from torch.nn import LayerNorm
@@ -25,6 +25,7 @@ from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
 from networks.pre_block import ResBlock3d
+from networks.merging_mode import MERGING_MODE
 
 rearrange, _ = optional_import("einops", name="rearrange")
 
@@ -56,8 +57,8 @@ class SwinUNETR(nn.Module):
         in_channels: int,
         out_channels: int,
         depths: Sequence[int] = (2, 2, 2, 2),
-        num_heads: Sequence[int] = (3, 6, 12, 24),
-        feature_size: int = 24,
+        num_heads: Sequence[int] = (4, 8, 16, 32),
+        feature_size: int = 48,
         norm_name: Union[Tuple, str] = "instance",
         drop_rate: float = 0.0,
         attn_drop_rate: float = 0.0,
@@ -131,9 +132,9 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2, d_model=int(img_size[0]/2)),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1, d_model=int(img_size[0]/2)),
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
         )
 
         # self.preBlock = nn.Sequential(
@@ -278,7 +279,7 @@ class SwinUNETR(nn.Module):
         dec1 = self.decoder3(dec2, enc2) # 1/8, 96
         dec0 = self.decoder2(dec1, enc1) # 1/4, 48
       
-        return {'0': dec0, '1': dec1, '2': dec2}
+        return {'0': dec0, '1': dec1}
 
 def window_partition(x, window_size):
     """window partition operation based on: "Liu et al.,
@@ -576,7 +577,7 @@ class SwinTransformerBlock(nn.Module):
             shifted_x = x
             attn_mask = None
         x_windows = window_partition(shifted_x, window_size)
-        attn_windows = self.attn(x_windows, mask=attn_mask)
+        attn_windows = self.attn(x_windows, mask=attn_mask) # [250, 343, 48]
         attn_windows = attn_windows.view(-1, *(window_size + (c,)))
         shifted_x = window_reverse(attn_windows, window_size, dims)
         if any(i > 0 for i in shift_size):
@@ -613,84 +614,6 @@ class SwinTransformerBlock(nn.Module):
             x = x + self.forward_part2(x)
         return x
 
-
-class PatchMergingV2(nn.Module):
-    """
-    Patch merging layer based on: "Liu et al.,
-    Swin Transformer: Hierarchical Vision Transformer using Shifted Windows
-    <https://arxiv.org/abs/2103.14030>"
-    https://github.com/microsoft/Swin-Transformer
-    """
-
-    def __init__(self, dim: int, norm_layer: Type[LayerNorm] = nn.LayerNorm, spatial_dims: int = 3) -> None:
-        """
-        Args:
-            dim: number of feature channels.
-            norm_layer: normalization layer.
-            spatial_dims: number of spatial dims.
-        """
-
-        super().__init__()
-        self.dim = dim
-        if spatial_dims == 3:
-            self.reduction = nn.Linear(8 * dim, 2 * dim, bias=False)
-            self.norm = norm_layer(8 * dim)
-        elif spatial_dims == 2:
-            self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
-            self.norm = norm_layer(4 * dim)
-
-    def forward(self, x):
-
-        x_shape = x.size()
-        if len(x_shape) == 5:
-            b, d, h, w, c = x_shape
-            pad_input = (h % 2 == 1) or (w % 2 == 1) or (d % 2 == 1)
-            if pad_input:
-                x = F.pad(x, (0, 0, 0, w % 2, 0, h % 2, 0, d % 2))
-            x = torch.cat(
-                [x[:, i::2, j::2, k::2, :] for i, j, k in itertools.product(range(2), range(2), range(2))], -1
-            )
-
-        elif len(x_shape) == 4:
-            b, h, w, c = x_shape
-            pad_input = (h % 2 == 1) or (w % 2 == 1)
-            if pad_input:
-                x = F.pad(x, (0, 0, 0, w % 2, 0, h % 2))
-            x = torch.cat([x[:, j::2, i::2, :] for i, j in itertools.product(range(2), range(2))], -1)
-
-        x = self.norm(x)
-        x = self.reduction(x)
-        return x
-
-
-class PatchMerging(PatchMergingV2):
-    """The `PatchMerging` module previously defined in v0.9.0."""
-
-    def forward(self, x):
-        x_shape = x.size()
-        if len(x_shape) == 4:
-            return super().forward(x)
-        if len(x_shape) != 5:
-            raise ValueError(f"expecting 5D x, got {x.shape}.")
-        b, d, h, w, c = x_shape
-        pad_input = (h % 2 == 1) or (w % 2 == 1) or (d % 2 == 1)
-        if pad_input:
-            x = F.pad(x, (0, 0, 0, w % 2, 0, h % 2, 0, d % 2))
-        x0 = x[:, 0::2, 0::2, 0::2, :]
-        x1 = x[:, 1::2, 0::2, 0::2, :]
-        x2 = x[:, 0::2, 1::2, 0::2, :]
-        x3 = x[:, 0::2, 0::2, 1::2, :]
-        x4 = x[:, 1::2, 0::2, 1::2, :]
-        x5 = x[:, 0::2, 1::2, 0::2, :]
-        x6 = x[:, 0::2, 0::2, 1::2, :]
-        x7 = x[:, 1::2, 1::2, 1::2, :]
-        x = torch.cat([x0, x1, x2, x3, x4, x5, x6, x7], -1)
-        x = self.norm(x)
-        x = self.reduction(x)
-        return x
-
-
-MERGING_MODE = {"merging": PatchMerging, "mergingv2": PatchMergingV2}
 
 
 def compute_mask(dims, window_size, shift_size, device):
@@ -944,7 +867,7 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x, normalize=True):
         x0 = self.patch_embed(x) # 48, 1/4
-        x0 = self.pos_drop(x0)
+        x0 = self.pos_drop(x0) # 48, 1/4
         x0_out = self.proj_out(x0, normalize)
         x1 = self.layers1[0](x0.contiguous())
         x1_out = self.proj_out(x1, normalize)

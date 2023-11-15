@@ -27,7 +27,7 @@ from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")
@@ -143,10 +143,10 @@ def main():
                 inference_data_i["image_meta_dict"]["filename_or_obj"] for inference_data_i in inference_data
             ]
             print(inference_img_filenames)
-            # use_inferer = not all(
-            #     [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
-            # )
-            use_inferer = True
+            use_inferer = not all(
+                [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
+            )
+            # use_inferer = True
             inference_inputs = [pad2factor(inference_data_i["image"]).to(device) for inference_data_i in inference_data]
 
             if amp:
