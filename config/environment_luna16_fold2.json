@@ -1,5 +1,5 @@
 {
-    "model_path": "trained_models/swin_ticnet/model_luna16_fold2.pt",
+    "model_path": "trained_models/swin_ticnet_3fpn/model_luna16_fold2_last.pt",
     "data_base_dir": "/nvmedata/ligen/PreprocessedImage",
     "data_list_file_path": "./LUNA16_datasplit/dataset_fold2_npy.json",
     "tfevent_path": "tfevent_train/fold2",

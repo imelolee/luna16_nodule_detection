@@ -27,14 +27,14 @@ from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./config/environment_luna16_fold0.json",
+        default="./config/environment_luna16_fold1.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(

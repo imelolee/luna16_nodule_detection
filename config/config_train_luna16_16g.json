@@ -10,7 +10,7 @@
 	"spatial_dims": 3,
 	"score_thresh": 0.02,
 	"nms_thresh": 0.22,
-	"returned_layers": [1,2],
+	"returned_layers": [1,2,3],
 	"conv1_t_stride": [2,2,1],
 	"base_anchor_shapes": [[6,8,4],[8,6,5],[10,10,6]],
 	"balanced_sampler_pos_fraction": 0.3,
