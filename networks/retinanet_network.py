@@ -360,6 +360,6 @@ def fpn_feature_extractor(
 
 
     feature_extractor = BackboneWithFPN(
-        backbone, in_channels_list=[128, 64, 128], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
+        backbone, in_channels_list=[128, 128, 128], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
     )
     return feature_extractor

@@ -37,6 +37,7 @@ from networks.retinanet_network import (
 from networks.swin_ticnet.feature_net import FeatureNet
 from networks.swin_unetr import SwinUNETR
 from networks.unetr import UNETR
+from networks.swin_ticnet.dense_feature_net import DenseFeatureNet
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
 from monai.data.utils import no_collation
@@ -180,10 +181,14 @@ def main():
         #     return_intermediate_dec =True       
         # )
 
-        backbone = FeatureNet(
+        backbone = DenseFeatureNet(
             in_channels = 1,
             out_channels = 128, 
+            num_layers=4,
+            bn_size=4,
+            growth_rate=12
         )
+
 
         # backbone = SwinUNETR(
         #     img_size=(128, 128, 128),

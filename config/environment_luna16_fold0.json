@@ -1,5 +1,5 @@
 {
-    "model_path": "trained_models/debug/model_luna16_fold0_last.pt",
+    "model_path": "trained_models/debug/model_luna16_fold0.pt",
     "data_base_dir": "/nvmedata/ligen/PreprocessedImage",
     "data_list_file_path": "./LUNA16_datasplit/dataset_fold0_npy.json",
     "tfevent_path": "tfevent_train",
