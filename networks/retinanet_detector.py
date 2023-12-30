@@ -43,8 +43,8 @@ from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 import torch
 from torch import Tensor, nn
 
-from monai.apps.detection.utils.anchor_utils import AnchorGenerator
-from monai.apps.detection.utils.ATSS_matcher import ATSSMatcher
+from .anchor_utils import AnchorGenerator
+from .ATSS_matcher import ATSSMatcher
 from monai.apps.detection.utils.box_coder import BoxCoder
 from monai.apps.detection.utils.box_selector import BoxSelector
 from monai.apps.detection.utils.detector_utils import check_training_targets, preprocess_images
@@ -295,7 +295,7 @@ class RetinaNetDetector(nn.Module):
         Args:
             num_candidates: number of positions to select candidates from.
                 Smaller value will result in a higher matcher threshold and less matched candidates.
-            center_in_gt: If False (default), matched anchor center points do not need
+                center_in_gt: If False (default), matched anchor center points do not need
                 to lie withing the ground truth box. Recommend False for small objects.
                 If True, will result in a strict matcher and less matched candidates.
         """

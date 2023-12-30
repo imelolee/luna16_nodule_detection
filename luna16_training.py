@@ -35,7 +35,7 @@ from networks.retinanet_network import (
     fpn_feature_extractor,
 )
 from networks.swin_ticnet.feature_net import FeatureNet
-from networks.swin_unetr import SwinUNETR
+from networks.swin_unetr.swin_unetr import SwinUNETR
 from networks.unetr import UNETR
 from networks.swin_ticnet.dense_feature_net import DenseFeatureNet
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape

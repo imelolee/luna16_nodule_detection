@@ -24,8 +24,8 @@ from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, Une
 from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
-from networks.pre_block import ResBlock3d
-from networks.merging_mode import MERGING_MODE
+from networks.swin_unetr.block import ResBlock3d
+from networks.swin_unetr.merging_mode import MERGING_MODE
 
 rearrange, _ = optional_import("einops", name="rearrange")
 
