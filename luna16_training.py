@@ -35,9 +35,9 @@ from networks.retinanet_network import (
     fpn_feature_extractor,
 )
 from networks.swin_ticnet.feature_net import FeatureNet
-from networks.swin_unetr.swin_unetr import SwinUNETR
-from networks.unetr import UNETR
-from networks.swin_ticnet.dense_feature_net import DenseFeatureNet
+# from networks.swin_unetr.swin_unetr import SwinUNETR
+# from networks.unetr import UNETR
+# from networks.swin_ticnet.dense_feature_net import DenseFeatureNet
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
 from monai.data.utils import no_collation
@@ -49,7 +49,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -130,7 +130,7 @@ def main():
     )
     train_loader = DataLoader(
         train_ds,
-        batch_size=1,
+        batch_size=2,
         shuffle=True,
         num_workers=7,
         pin_memory=torch.cuda.is_available(),
@@ -145,7 +145,7 @@ def main():
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=1,
+        batch_size=2,
         num_workers=2,
         pin_memory=torch.cuda.is_available(),
         collate_fn=no_collation,
@@ -166,28 +166,18 @@ def main():
 
     if not resume_checkpoint:
         # 2) build network
-        # backbone = FeatureNet(
-        #     in_channels = 1,
-        #     out_channels = 128,
-        #     hidden_dim = 64,
-        #     position_embedding = 'sine',  
-        #     dropout = 0.1,
-        #     nheads = 8,
-        #     num_queries = 512,
-        #     dim_feedforward = 256,
-        #     num_encoder_layers = 6,
-        #     num_decoder_layers = 6,
-        #     normalize_before = None,
-        #     return_intermediate_dec =True       
-        # )
-
-        backbone = DenseFeatureNet(
+        backbone = FeatureNet(
             in_channels = 1,
-            out_channels = 128, 
-            num_layers=4,
-            bn_size=4,
-            growth_rate=12
+            out_channels = 128,
         )
+
+        # backbone = DenseFeatureNet(
+        #     in_channels = 1,
+        #     out_channels = 128, 
+        #     num_layers=4,
+        #     bn_size=4,
+        #     growth_rate=12
+        # )
 
 
         # backbone = SwinUNETR(
@@ -329,7 +319,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 200
+    max_epochs = 300
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
     for epoch in range(max_epochs):
@@ -397,6 +387,8 @@ def main():
         tensorboard_writer.add_scalar("avg_train_cls_loss", epoch_cls_loss, epoch + 1)
         tensorboard_writer.add_scalar("avg_train_box_reg_loss", epoch_box_reg_loss, epoch + 1)
         tensorboard_writer.add_scalar("train_lr", optimizer.param_groups[0]["lr"], epoch + 1)
+        if epoch == 200:
+            torch.save(detector.network, env_dict["model_path"][:-3] + "_200.pt")
 
         # save last trained model
         torch.save(detector.network, env_dict["model_path"][:-3] + "_last.pt")

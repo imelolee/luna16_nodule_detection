@@ -79,6 +79,14 @@ class FeatureNet(nn.Module):
             Atten_Conv_Block(128),
         )
 
+        self.back4 = nn.Sequential(
+            # 64 + 64 + 3, where 3 is the channel dimension of coord
+            ResBlock3d(128, 32),
+            ResBlock3d(32, 32),
+            ResBlock3d(32, 32),
+            Atten_Conv_Block(32),
+        )
+
         
 
         self.maxpool1 = nn.MaxPool3d(kernel_size=2, stride=2,
@@ -149,6 +157,8 @@ class FeatureNet(nn.Module):
         comb2 = self.back2(torch.cat((rev2, out3_scale), 1))  
         rev1 = self.path2(comb2)
         comb1 = self.back1(torch.cat((rev1, out2_scale), 1))  
+
+        comb3 = self.back4(comb3)
 
         return {'0': comb1, '1': comb2, '2': comb3}
 
