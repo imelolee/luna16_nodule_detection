@@ -18,12 +18,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from typing import Optional, Union, Dict, List
 
 from monai.networks.blocks import ADN
 from monai.networks.blocks.aspp import SimpleASPP
-from monai.networks.blocks.backbone_fpn_utils import BackboneWithFPN
 from monai.networks.blocks.convolutions import Convolution
-from monai.networks.blocks.feature_pyramid_network import ExtraFPNBlock, FeaturePyramidNetwork
+from monai.networks.blocks.feature_pyramid_network import ExtraFPNBlock, FeaturePyramidNetwork, LastLevelMaxPool
 from monai.networks.layers.factories import Conv, Norm
 from monai.networks.nets.resnet import ResNet, ResNetBottleneck
 
@@ -378,21 +378,34 @@ class Daf3dFPN(FeaturePyramidNetwork):
                 kernel_size=1,
                 adn_ordering="NA",
                 act="PRELU",
-                norm=("group", {"num_groups": 32, "num_channels": 128}),
             )
             self.inner_blocks.append(inner_block_module)
+    
+    def get_result_from_inner_blocks(self, x: Tensor, idx: int) -> Tensor:
+        """
+        This is equivalent to self.inner_blocks[idx](x),
+        but torchscript doesn't support this yet
+        """
+        num_blocks = len(self.inner_blocks)
+        if idx < 0:
+            idx += num_blocks
+        out = x
+        for i, module in enumerate(self.inner_blocks):
+            if i == idx:
+                out = module(x)
+        return out
 
     def forward(self, x: dict[str, Tensor]) -> dict[str, Tensor]:
         # unpack OrderedDict into two lists for easier handling
-        names = list(x.keys())
-        x_values: list[Tensor] = list(x.values())
+        names = list('out')
+        x_values = x
 
         last_inner = self.get_result_from_inner_blocks(x_values[-1], -1)
         results = []
         results.append(last_inner)
 
         for idx in range(len(x_values) - 2, -1, -1):
-            inner_lateral = self.get_result_from_inner_blocks(x_values[idx], idx)
+            inner_lateral = self.get_result_from_inner_blocks(x_values, idx)
             feat_shape = inner_lateral.shape[2:]
             inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="trilinear")
             last_inner = inner_lateral + inner_top_down
@@ -409,7 +422,8 @@ class Daf3dFPN(FeaturePyramidNetwork):
         return out
 
 
-class Daf3dBackboneWithFPN(BackboneWithFPN):
+
+class Daf3dBackboneWithFPN(nn.Module):
     """
     Same as BackboneWithFPN but uses custom Daf3DFPN as feature pyramid network
 
@@ -438,8 +452,9 @@ class Daf3dBackboneWithFPN(BackboneWithFPN):
         spatial_dims: int | None = None,
         extra_blocks: ExtraFPNBlock | None = None,
     ) -> None:
-        super().__init__(backbone, return_layers, in_channels_list, out_channels, spatial_dims, extra_blocks)
+        super().__init__()
 
+        # if spatial_dims is not specified, try to find it from backbone.
         if spatial_dims is None:
             if hasattr(backbone, "spatial_dims") and isinstance(backbone.spatial_dims, int):
                 spatial_dims = backbone.spatial_dims
@@ -448,11 +463,29 @@ class Daf3dBackboneWithFPN(BackboneWithFPN):
             elif isinstance(backbone.conv1, nn.Conv3d):
                 spatial_dims = 3
             else:
-                raise ValueError(
-                    "Could not determine value of  `spatial_dims` from backbone, please provide explicit value."
-                )
+                raise ValueError("Could not find spatial_dims of backbone, please specify it.")
+
+        if extra_blocks is None:
+            extra_blocks = LastLevelMaxPool(spatial_dims)
+
+        self.body = backbone
+        self.out_channels = out_channels
 
         self.fpn = Daf3dFPN(spatial_dims, in_channels_list, out_channels, extra_blocks)
+
+    def forward(self, x: Tensor) -> Dict[str, Tensor]:
+        """
+        Computes the resulted feature maps of the network.
+
+        Args:
+            x: input images
+
+        Returns:
+            feature maps after FPN layers. They are ordered from highest resolution first.
+        """
+        x = self.body(x)  # backbone
+        y: Dict[str, Tensor] = self.fpn(x)  # FPN
+        return y
 
 
 class DAF3D(nn.Module):
@@ -480,18 +513,18 @@ class DAF3D(nn.Module):
         self.visual_output = visual_output
 
         self.preBlock = nn.Sequential(
-            nn.Conv3d(in_channels, 32, kernel_size=3, padding=1, stride=2),
-            nn.BatchNorm3d(32, momentum=0.1),
+            nn.Conv3d(in_channels, 24, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm3d(24, momentum=0.1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm3d(32, momentum=0.1),
+            nn.Conv3d(24, 24, kernel_size=3, padding=1),
+            nn.BatchNorm3d(24, momentum=0.1),
             nn.ReLU(inplace=True)
         )
 
         self.backbone_with_fpn = Daf3dBackboneWithFPN(
-            backbone=Daf3dBackbone(32),
+            backbone=Daf3dBackbone(24),
             return_layers={"layer1": "feat1", "layer2": "feat2", "layer3": "feat3", "layer4": "feat4"},
-            in_channels_list=[256, 512, 1024, 2048],
+            in_channels_list=[2048, 2048, 2048, 2048],
             out_channels=128,
             spatial_dims=3,
         )
@@ -548,12 +581,6 @@ class DAF3D(nn.Module):
             bias=True,
         )
 
-        self.out_conv =  nn.Sequential(
-            nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2),
-            nn.GroupNorm(32, 128),
-            nn.LeakyReLU(inplace=True)
-        )
-
     def forward(self, x):
         x_pre = self.preBlock(x)
         # layers from 1 - 4
@@ -579,6 +606,17 @@ class DAF3D(nn.Module):
 
         supervised_final = self.predict2(aspp)
 
-        output = self.out_conv(supervised_final)
-
-        return {'0': output, '1': supervised_final}
+        if self.training:
+            output = supervised1 + supervised2 + [supervised_final]
+            output = [F.interpolate(o, size=x.size()[2:], mode="trilinear") for o in output]
+        else:
+            if self.visual_output:
+                supervised_final = F.interpolate(supervised_final, size=x.size()[2:], mode="trilinear")
+                supervised_inner = [
+                    F.interpolate(o, size=x.size()[2:], mode="trilinear")
+                    for o in supervised1 + supervised2 + supervised3
+                ]
+                output = [supervised_final] + supervised_inner
+            else:
+                output = F.interpolate(supervised_final, size=x.size()[2:], mode="trilinear")
+        return output
