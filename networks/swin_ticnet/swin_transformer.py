@@ -557,13 +557,13 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x, normalize=True):
         x0 = self.pos_drop(x) # 48, 1/4
-        x0_out = self.proj_out(x0, normalize)
+      
         x1 = self.layers1[0](x0.contiguous())
-        x1_out = self.proj_out(x1, normalize)
+    
         x2 = self.layers2[0](x1.contiguous())
-        x2_out = self.proj_out(x2, normalize)
+     
         x3 = self.layers3[0](x2.contiguous())
-        x3_out = self.proj_out(x3, normalize)
+   
         x4 = self.layers4[0](x3.contiguous())
         x4_out = self.proj_out(x4, normalize)
         return x4_out # [2, 768, 8, 8, 8]

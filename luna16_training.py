@@ -1,13 +1,3 @@
-# Copyright (c) MONAI Consortium
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#     http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import os
 import argparse
 import gc
@@ -35,9 +25,7 @@ from networks.retinanet_network import (
     fpn_feature_extractor,
 )
 from networks.swin_ticnet.feature_net import FeatureNet
-# from networks.swin_unetr.swin_unetr import SwinUNETR
-# from networks.unetr import UNETR
-# from networks.swin_ticnet.dense_feature_net import DenseFeatureNet
+
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
 from monai.data.utils import no_collation
@@ -49,7 +37,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -101,7 +89,7 @@ def main():
         args.gt_box_mode,
         intensity_transform,
         args.patch_size,
-        args.batch_size,
+        batch_size=4, # batch size per image not the input batch size
         affine_lps_to_ras=True,
         amp=amp,
     )
@@ -130,7 +118,7 @@ def main():
     )
     train_loader = DataLoader(
         train_ds,
-        batch_size=2,
+        batch_size=args.batch_size,
         shuffle=True,
         num_workers=7,
         pin_memory=torch.cuda.is_available(),
@@ -145,7 +133,7 @@ def main():
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=2,
+        batch_size=args.batch_size,
         num_workers=2,
         pin_memory=torch.cuda.is_available(),
         collate_fn=no_collation,
@@ -166,11 +154,14 @@ def main():
 
     if not resume_checkpoint:
         # 2) build network
+
+        # TiCnet / Swin-TiCnet
         backbone = FeatureNet(
             in_channels = 1,
             out_channels = 128,
         )
 
+        # Swin-TiCnet with dense block
         # backbone = DenseFeatureNet(
         #     in_channels = 1,
         #     out_channels = 128, 
@@ -179,7 +170,7 @@ def main():
         #     growth_rate=12
         # )
 
-
+        # Swin-UNETR
         # backbone = SwinUNETR(
         #     img_size=(128, 128, 128),
         #     in_channels=1,
@@ -198,6 +189,7 @@ def main():
         #     block_inplanes=args.block_inplanes
         # )
    
+        # UNETR
         # backbone = UNETR(
         #     img_size=(128, 128, 128),
         #     in_channels=1,
@@ -265,11 +257,12 @@ def main():
         optimizer.zero_grad()
         optimizer.step()
 
+    # load model from checkpoint
     else:
         net = torch.load(env_dict["model_path"]).to(device)
         print(f"Load model from {env_dict['model_path']}")
 
-         # 3) build detector
+        # 3) build detector
         detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
 
         # set training components
@@ -387,8 +380,8 @@ def main():
         tensorboard_writer.add_scalar("avg_train_cls_loss", epoch_cls_loss, epoch + 1)
         tensorboard_writer.add_scalar("avg_train_box_reg_loss", epoch_box_reg_loss, epoch + 1)
         tensorboard_writer.add_scalar("train_lr", optimizer.param_groups[0]["lr"], epoch + 1)
-        if epoch == 200:
-            torch.save(detector.network, env_dict["model_path"][:-3] + "_200.pt")
+        if (epoch + 1) % 100 == 0:
+            torch.save(detector.network, env_dict["model_path"][:-3] + f"_{epoch + 1}.pt")
 
         # save last trained model
         torch.save(detector.network, env_dict["model_path"][:-3] + "_last.pt")
