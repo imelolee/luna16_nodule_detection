@@ -3,22 +3,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-bn_momentum = 0.1
 
 class ResBlock3d(nn.Module):
     def __init__(self, n_in, n_out, stride=1, ):
         super(ResBlock3d, self).__init__()
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm3d(n_out, momentum=bn_momentum)
+        self.bn1 = nn.BatchNorm3d(n_out, momentum=0.1)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(n_out, momentum=bn_momentum)
+        self.bn2 = nn.BatchNorm3d(n_out, momentum=0.1)
 
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
-                nn.BatchNorm3d(n_out, momentum=bn_momentum))
+                nn.BatchNorm3d(n_out, momentum=0.1))
         else:
             self.shortcut = None
 

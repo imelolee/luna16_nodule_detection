@@ -89,7 +89,7 @@ def main():
         args.gt_box_mode,
         intensity_transform,
         args.patch_size,
-        batch_size=4, # batch size per image not the input batch size
+        batch_size=args.batch_size_per_image, # batch size per image not the input batch size
         affine_lps_to_ras=True,
         amp=amp,
     )

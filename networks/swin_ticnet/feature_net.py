@@ -6,6 +6,8 @@ import torch
 from torch import nn
 
 
+
+
 class FeatureNet(nn.Module):
     def __init__(
             self, 
@@ -28,56 +30,58 @@ class FeatureNet(nn.Module):
         )
 
         self.forw2 = nn.Sequential(
-            ResBlock3d(32, 48),
-            ResBlock3d(48, 48),
-            Atten_Conv_Block(48),
+            ResBlock3d(32, 64),
+            ResBlock3d(64, 64),
+            Atten_Conv_Block(64),
         )
 
         self.forw3 = nn.Sequential(
-            ResBlock3d(48, 48),
-            ResBlock3d(48, 48),
-            ResBlock3d(48, 48),
-            Atten_Conv_Block(48),
+            ResBlock3d(64, 64),
+            ResBlock3d(64, 64),
+            ResBlock3d(64, 64),
+            Atten_Conv_Block(64),
         )
 
         self.forw4 = nn.Sequential(
-            ResBlock3d(48, 48),
-            ResBlock3d(48, 48),
-            ResBlock3d(48, 48),
+            ResBlock3d(64, 64),
+            ResBlock3d(64, 64),
+            ResBlock3d(64, 48),
             Atten_Conv_Block(48),
         )
 
         self.forw_tr = nn.Sequential(
-            ResBlock3d(768, 384),
-            ResBlock3d(384, 384),
-            ResBlock3d(384, 384),
-            Atten_Conv_Block(384),
+            ResBlock3d(768, 128),
+            ResBlock3d(128, 128),
+            ResBlock3d(128, 128),
+            Atten_Conv_Block(128),
         )
 
         # skip connection in U-net
         self.back1 = nn.Sequential(
             # 64 + 64 + 3, where 3 is the channel dimension of coord
-            ResBlock3d(384 + 48, 192),
-            ResBlock3d(192, 192),
-            ResBlock3d(192, 192),
-            Atten_Conv_Block(192),
+            ResBlock3d(128, 128),
+            ResBlock3d(128, 128),
+            ResBlock3d(128, out_channels),
+            Atten_Conv_Block(out_channels),
         )
 
         # skip connection in U-net
         self.back2 = nn.Sequential(
-            ResBlock3d(384+48, 384),
-            ResBlock3d(384, 384),
-            ResBlock3d(384, 384),
-            Atten_Conv_Block(384),
+            ResBlock3d(192, 64),
+            ResBlock3d(64, 64),
+            ResBlock3d(64, 64),
+            Atten_Conv_Block(64),
         )
 
         # skip connection in U-net
         self.back3 = nn.Sequential(
-            ResBlock3d(384 + 48, 384),
-            ResBlock3d(384, 384),
-            ResBlock3d(384, 384),
-            Atten_Conv_Block(384),
+            ResBlock3d(192, 128),
+            ResBlock3d(128, 128),
+            ResBlock3d(128, 128),
+            Atten_Conv_Block(128),
         )
+
+        
 
         self.maxpool1 = nn.MaxPool3d(kernel_size=2, stride=2,
                                      return_indices=True)
@@ -105,56 +109,49 @@ class FeatureNet(nn.Module):
             spatial_dims=3,
         )
 
-        self.scale1 = conv_3nV1(32, 48, 48, 48)
+        self.scale1 = conv_3nV1(32, 64, 64)
 
-        self.scale2 = conv_3nV1(48, 48, 48, 48)
+        self.scale2 = conv_3nV1(64, 64, 48)
 
-        self.scale3 = conv_2nV1(48, 48, 48)
+        self.scale3 = conv_2nV1(64, 48)
 
         # upsampling in U-net
         self.path1 = nn.Sequential(
-            nn.ConvTranspose3d(384, 384, kernel_size=2, stride=2),
-            nn.BatchNorm3d(384),
+            nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2),
+            nn.BatchNorm3d(128),
             nn.ReLU(inplace=True))
 
         # upsampling in U-net
         self.path2 = nn.Sequential(
-            nn.ConvTranspose3d(384, 384, kernel_size=2, stride=2),
-            nn.BatchNorm3d(384),
+            nn.ConvTranspose3d(64, 64, kernel_size=2, stride=2),
+            nn.BatchNorm3d(64),
             nn.ReLU(inplace=True))
-        
-        self.path3 = nn.Sequential(
-            nn.Conv3d(192, 192, kernel_size=3, padding=1),
-            nn.BatchNorm3d(192),
-            nn.ReLU(inplace=True)
-        )
 
     def forward(self, x):
-        out = self.preBlock(x)  # 24
-        out1 = self.forw1(out)  # 32
+        out = self.preBlock(x)  # 24, 1/2
+        out_pool = out
+        out1 = self.forw1(out_pool)  # 32
         out1_pool, _ = self.maxpool2(out1)
-        out2 = self.forw2(out1_pool)  # 48
-      
+        out2 = self.forw2(out1_pool)  # 64
+
         out2_pool, _ = self.maxpool3(out2)
-        out3 = self.forw3(out2_pool)  # 48
+        out3 = self.forw3(out2_pool)  # 64
         out3_pool, _ = self.maxpool4(out3)
-        out4 = self.forw4(out3_pool)  # 48
-       
-        out4_tr = self.swinViT(out4) # 768
-        rev3 = self.forw_tr(out4_tr) # 384
+        out4 = self.forw4(out3_pool)  # 64
 
-        out2_scale = self.scale1(out1, out2, out3) # 48
-        out3_scale = self.scale2(out2, out3, out4) # 48
-        out4_scale = self.scale3(out3, out4) # 48
+        out4_tr = self.swinViT(out4)
+        rev3 = self.forw_tr(out4_tr)  # 128
 
-        comb3 = self.back3(torch.cat((rev3, out4_scale), 1)) # 384
-        rev2 = self.path1(comb3) # 384
+        out2_scale = self.scale1(out1, out2, out3)
+        out3_scale = self.scale2(out2, out3, out4)
+        out4_scale = self.scale3(out3, out4)
 
-        comb2 = self.back2(torch.cat((rev2, out3_scale), 1)) # 384
-        rev1 = self.path2(comb2) # 384
-        comb1 = self.back1(torch.cat((rev1, out2_scale), 1)) # 192
+        comb3 = self.back3(torch.cat((rev3, out4_scale), 1))
+        rev2 = self.path1(comb3)
 
-        comb1 = self.path3(comb1) # 192
+        comb2 = self.back2(torch.cat((rev2, out3_scale), 1))  # 96+96
+        rev1 = self.path2(comb2)
+        comb1 = self.back1(torch.cat((rev1, out2_scale), 1))  # 64+64
 
         return {'0': comb1, '1': comb2}
 
