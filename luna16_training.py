@@ -24,7 +24,7 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.swin_ticnet.feature_net import FeatureNet
+from networks.swin_unetr.swin_unetr import SwinUNETR
 
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
@@ -37,7 +37,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -156,10 +156,10 @@ def main():
         # 2) build network
 
         # TiCnet / Swin-TiCnet
-        backbone = FeatureNet(
-            in_channels = 1,
-            out_channels = 128,
-        )
+        # backbone = FeatureNet(
+        #     in_channels = 1,
+        #     out_channels = 128,
+        # )
 
         # Swin-TiCnet with dense block
         # backbone = DenseFeatureNet(
@@ -171,23 +171,23 @@ def main():
         # )
 
         # Swin-UNETR
-        # backbone = SwinUNETR(
-        #     img_size=(128, 128, 128),
-        #     in_channels=1,
-        #     out_channels=128,
-        #     depths=(2, 2, 2, 2),
-        #     num_heads=(3, 6, 12, 24),
-        #     feature_size=48,
-        #     norm_name="instance",
-        #     drop_rate=0.1,
-        #     attn_drop_rate=0.1,
-        #     dropout_path_rate=0.1,
-        #     normalize=True,
-        #     use_checkpoint=False,
-        #     spatial_dims=3,
-        #     downsample="merging",
-        #     block_inplanes=args.block_inplanes
-        # )
+        backbone = SwinUNETR(
+            img_size=(64, 64, 64),
+            in_channels=1,
+            out_channels=128,
+            depths=(2, 2, 4, 6),
+            num_heads=(3, 6, 12, 24),
+            feature_size=48,
+            norm_name="instance",
+            drop_rate=0.1,
+            attn_drop_rate=0.1,
+            dropout_path_rate=0.1,
+            normalize=True,
+            use_checkpoint=False,
+            spatial_dims=3,
+            downsample="merging",
+            block_inplanes=args.block_inplanes
+        )
    
         # UNETR
         # backbone = UNETR(
@@ -251,7 +251,7 @@ def main():
             weight_decay=3e-5,
             nesterov=True,
         )
-        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.1)
+        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
         scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=10, after_scheduler=after_scheduler)
         scaler = torch.cuda.amp.GradScaler() if amp else None
         optimizer.zero_grad()
@@ -312,7 +312,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 300
+    max_epochs = 100
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
     for epoch in range(max_epochs):

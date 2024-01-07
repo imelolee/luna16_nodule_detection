@@ -93,7 +93,7 @@ def generate_detection_train_transform(
                 spatial_size=patch_size,
                 whole_box=True,
                 num_samples=batch_size,
-                pos=1,
+                pos=3,
                 neg=1,
             ),
             RandZoomBoxd(
@@ -296,7 +296,7 @@ def generate_detection_inference_transform(
     )
     return test_transforms, post_transforms
 
-def pad2factor(image, factor=64, pad_value=0):
+def pad2factor(image, factor=32, pad_value=0):
     _, depth, height, width = image.shape
     d = int(math.ceil(depth / float(factor))) * factor
     h = int(math.ceil(height / float(factor))) * factor
