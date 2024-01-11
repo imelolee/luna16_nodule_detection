@@ -42,6 +42,7 @@ from typing import Callable, Dict, List, Sequence, Union
 
 import torch
 from torch import Tensor, nn
+from torch.nn.parallel import data_parallel
 
 from networks.build_fpn import BackboneWithFPN
 
@@ -262,12 +263,15 @@ class RetinaNet(nn.Module):
         num_anchors: int,
         feature_extractor,
         size_divisible: Union[Sequence[int], int] = 1,
+        train_parallel: bool = False,
     ):
         super().__init__()
 
         self.spatial_dims = look_up_option(spatial_dims, supported=[1, 2, 3])
         self.num_classes = num_classes
         self.size_divisible = ensure_tuple_rep(size_divisible, self.spatial_dims)
+
+        self.train_parallel = train_parallel
 
         if not hasattr(feature_extractor, "out_channels"):
             raise ValueError(
@@ -305,7 +309,10 @@ class RetinaNet(nn.Module):
 
         """
         # compute features maps list from the input images.
-        features = self.feature_extractor(images)
+        if self.train_parallel:
+            features = data_parallel(self.feature_extractor, images)
+        else:
+            features = self.feature_extractor(images)
         if isinstance(features, Tensor):
             feature_maps = [features]
         elif torch.jit.isinstance(features, Dict[str, Tensor]):
@@ -318,9 +325,15 @@ class RetinaNet(nn.Module):
 
         # compute classification and box regression maps from the feature maps
         # expandable for mask prediction in the future
+        if self.train_parallel:
+            cls_out = data_parallel(self.classification_head, feature_maps)
+            reg_out = data_parallel(self.regression_head, feature_maps)
+        else:
+            cls_out = self.classification_head(feature_maps)
+            reg_out = self.regression_head(feature_maps)
 
-        head_outputs: Dict[str, List[Tensor]] = {self.cls_key: self.classification_head(feature_maps)}
-        head_outputs[self.box_reg_key] = self.regression_head(feature_maps)
+        head_outputs: Dict[str, List[Tensor]] = {self.cls_key: cls_out}
+        head_outputs[self.box_reg_key] = reg_out
 
         return head_outputs
 

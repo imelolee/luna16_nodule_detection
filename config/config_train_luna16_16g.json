@@ -15,5 +15,6 @@
 	"conv1_t_stride": [2,2,1],
 	"base_anchor_shapes": [[6,8,4],[8,6,5],[10,10,6]],
 	"balanced_sampler_pos_fraction": 0.3,
-	"block_inplanes": [64, 128, 256, 512]
+	"block_inplanes": [64, 128, 256, 512],
+	"train_parallel": true
 }

@@ -37,7 +37,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,3'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -212,6 +212,7 @@ def main():
             num_anchors=num_anchors,
             feature_extractor=feature_extractor,
             size_divisible=size_divisible,
+            train_parallel=args.train_parallel,
         )
 
         # 3) build detector
