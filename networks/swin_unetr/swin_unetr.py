@@ -24,7 +24,7 @@ from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, Une
 from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
-from networks.swin_unetr.block import ResBlock3d
+from networks.swin_unetr.block import ResBlock3d, GRUBlock
 from networks.swin_unetr.merging_mode import MERGING_MODE
 
 rearrange, _ = optional_import("einops", name="rearrange")
@@ -131,14 +131,14 @@ class SwinUNETR(nn.Module):
 
         self.normalize = normalize
 
-        # self.preBlock = nn.Sequential(
-        #     ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
-        #     ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
-        #     ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
-        # )
+        self.preBlock = nn.Sequential(
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+        )
 
         self.swinViT = SwinTransformer(
-            in_chans=in_channels,
+            in_chans=feature_size,
             embed_dim=feature_size,
             window_size=window_size,
             patch_size=patch_size,
@@ -257,9 +257,11 @@ class SwinUNETR(nn.Module):
         self.out1 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
         self.out2 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
 
+        self.gru = GRUBlock(input_size=32*32, hidden_size=32*32)
+
 
     def forward(self, x_in):
-        # x_in = self.preBlock(x_in) # 1/2
+        x_in = self.preBlock(x_in) # 1/2
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
         enc1 = self.encoder2(hidden_states_out[0]) # 48, 1/2

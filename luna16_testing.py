@@ -34,7 +34,7 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./config/environment_luna16_fold1.json",
+        default="./config/environment_luna16_fold0.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
@@ -147,7 +147,7 @@ def main():
                 [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
             )
             # use_inferer = True
-            inference_inputs = [pad2factor(inference_data_i["image"]).to(device) for inference_data_i in inference_data]
+            inference_inputs = [pad2factor(inference_data_i["image"], factor=64).to(device) for inference_data_i in inference_data]
 
             if amp:
                 with torch.cuda.amp.autocast():

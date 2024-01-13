@@ -49,3 +49,14 @@ class ResBlock3d(nn.Module):
         out += residual
         out = self.relu(out)
         return out
+
+class GRUBlock(nn.Module):
+    def __init__(self, input_size, hidden_size) -> None:
+        super().__init__()
+        self.gru = nn.GRU(input_size=input_size, hidden_size=hidden_size, num_layers=2, batch_first=True)
+
+    def forward(self, x):
+        b, c, d, h, w = x.shape
+        x = x.view(b, d, -1)
+        x_out, _ = self.gru(x)
+        return x_out.view(b, c, d, h, w)
