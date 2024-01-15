@@ -24,7 +24,6 @@ from monai.networks.blocks import PatchEmbed, UnetOutBlock, UnetrBasicBlock, Une
 from monai.networks.layers import DropPath, trunc_normal_
 from monai.utils import ensure_tuple_rep, look_up_option, optional_import
 
-from networks.swin_unetr.block import ResBlock3d, GRUBlock
 from networks.swin_unetr.merging_mode import MERGING_MODE
 
 rearrange, _ = optional_import("einops", name="rearrange")
@@ -132,9 +131,15 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
-            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+            UnetrBasicBlock(
+                spatial_dims=spatial_dims, in_channels=in_channels, out_channels=feature_size, kernel_size=3, stride=2, norm_name=norm_name,res_block=True
+            ),
+            UnetrBasicBlock(
+                spatial_dims=spatial_dims, in_channels=feature_size, out_channels=feature_size, kernel_size=3, stride=1, norm_name=norm_name,res_block=True
+            ),
+            UnetrBasicBlock(
+                spatial_dims=spatial_dims, in_channels=feature_size, out_channels=feature_size, kernel_size=3, stride=1, norm_name=norm_name,res_block=True
+            ),      
         )
 
         self.swinViT = SwinTransformer(
@@ -257,8 +262,6 @@ class SwinUNETR(nn.Module):
         self.out1 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
         self.out2 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
 
-        self.gru = GRUBlock(input_size=32*32, hidden_size=32*32)
-
 
     def forward(self, x_in):
         x_in = self.preBlock(x_in) # 1/2
@@ -272,7 +275,7 @@ class SwinUNETR(nn.Module):
         dec2 = self.decoder4(dec3, enc3) # 192, 1/8
         dec1 = self.decoder3(dec2, enc2) # 96, 1/4
         dec0 = self.decoder2(dec1, enc1) # 48, 1/2
-      
+    
         return {'0': dec0, '1': dec1}
 
 def window_partition(x, window_size):

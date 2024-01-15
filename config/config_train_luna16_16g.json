@@ -5,7 +5,7 @@
 	"batch_size": 1,
 	"batch_size_per_image": 4,
 	"patch_size": [128,128,128],
-	"val_patch_size": [128,128,128],
+	"val_patch_size": [256,256,128],
 	"fg_labels": [0],
 	"n_input_channels": 1,
 	"spatial_dims": 3,
