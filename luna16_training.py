@@ -178,7 +178,7 @@ def main():
             depths=(2, 2, 4, 6),
             num_heads=(3, 6, 12, 24),
             feature_size=48,
-            norm_name="instance",
+            norm_name="batch",
             drop_rate=0.1,
             attn_drop_rate=0.1,
             dropout_path_rate=0.1,
