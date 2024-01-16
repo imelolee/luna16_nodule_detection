@@ -1,6 +1,6 @@
 import warnings
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
-
+import numpy as np
 import torch
 from torch import Tensor, nn
 
@@ -97,7 +97,7 @@ class RetinaNetDetector(nn.Module):
     """
 
     def __init__(
-        self, network, anchor_generator: AnchorGenerator, box_overlap_metric: Callable = box_iou, debug: bool = False
+        self, network, anchor_generator: AnchorGenerator, use_false_positive_reduction: bool = False, box_overlap_metric: Callable = box_iou, debug: bool = False
     ):
         super().__init__()
 
@@ -121,6 +121,7 @@ class RetinaNetDetector(nn.Module):
         # check if anchor_generator matches with network
         self.anchor_generator = anchor_generator
 
+        self.use_false_positive_reduction = use_false_positive_reduction
         self.num_anchors_per_loc = self.anchor_generator.num_anchors_per_location()[0]
         if self.num_anchors_per_loc != self.network.num_anchors:
             raise ValueError(
@@ -428,6 +429,22 @@ class RetinaNetDetector(nn.Module):
             # or (B, sum(HWA), 2* self.spatial_dims) for self.box_reg_key
             # A = self.num_anchors_per_loc
             head_outputs[key] = self._reshape_maps(head_outputs[key])
+        
+        if self.use_false_positive_reduction:
+            head_outputs_list = []
+
+            for i in range(len(self.anchors)):
+                head_outputs_list.append({
+                    self.cls_key: head_outputs[self.cls_key][i].unsqueeze(0),
+                    self.box_reg_key: head_outputs[self.box_reg_key][i].unsqueeze(0),
+                })
+
+            detections = []
+            for i in range(len(self.anchors)):
+                detection = self.postprocess_detections(
+                    head_outputs_list[i], [self.anchors[i]], [image_sizes[i]], num_anchor_locs_per_level  # type: ignore
+                )
+                detections.append(detection)
 
         # 6(1). If during training, return losses
         if self.training:
@@ -563,11 +580,11 @@ class RetinaNetDetector(nn.Module):
             box_regression_per_image = [
                 br[index] for br in box_regression
             ]  # List[Tensor], each sized (HWA, 2*spatial_dims)
-            logits_per_image = [cl[index] for cl in class_logits]  # List[Tensor], each sized (HWA, self.num_classes)
+            logits_per_image = [cl[index].detach() for cl in class_logits]  # List[Tensor], each sized (HWA, self.num_classes)
             anchors_per_image, img_spatial_size = split_anchors[index], image_sizes[index]
             # decode box regression into boxes
             boxes_per_image = [
-                self.box_coder.decode_single(b.to(torch.float32), a).to(compute_dtype)
+                self.box_coder.decode_single(b.to(torch.float32), a).to(compute_dtype).detach()
                 for b, a in zip(box_regression_per_image, anchors_per_image)
             ]  # List[Tensor], each sized (HWA, 2*spatial_dims)
 
@@ -892,3 +909,36 @@ class RetinaNetDetector(nn.Module):
             box_regression_per_image_ = self.box_coder.decode_single(box_regression_per_image_, anchors_per_image)
 
         return box_regression_per_image_, matched_gt_boxes_per_image_
+
+    def crop_roi(self, f, inputs, proposals):
+        self.DEPTH, self.HEIGHT, self.WIDTH = inputs.shape[2:]
+
+        crops = []
+        for p in proposals:
+            b = int(p[0])
+            center = p[2:5]
+            side_length = p[5:8]
+            c0 = center - side_length / 2  # left bottom corner
+            c1 = c0 + side_length  # right upper corner
+            c0 = (c0 / self.scale).floor().long()
+            c1 = (c1 / self.scale).ceil().long()
+            minimum = torch.LongTensor([[0, 0, 0]]).cuda()
+            maximum = torch.LongTensor(
+                np.array([[self.DEPTH, self.HEIGHT, self.WIDTH]]) / self.scale).cuda()
+
+            c0 = torch.cat((c0.unsqueeze(0).cuda(), minimum), 0)
+            c1 = torch.cat((c1.unsqueeze(0).cuda(), maximum), 0)
+            c0, _ = torch.max(c0, 0)
+            c1, _ = torch.min(c1, 0)
+
+            # Slice 0 dim, should never happen
+            if np.any((c1 - c0).cpu().data.numpy() < 1):
+                print(p)
+                print('c0:', c0, ', c1:', c1)
+            crop = f[b, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
+            crop = F.adaptive_max_pool3d(crop, self.rcnn_crop_size)
+            crops.append(crop)
+
+        crops = torch.stack(crops)
+
+        return crops

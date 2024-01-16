@@ -29,6 +29,7 @@ from networks.swin_unetr.merging_mode import MERGING_MODE
 rearrange, _ = optional_import("einops", name="rearrange")
 
 __all__ = [
+    "ResBlock3d"
     "SwinUNETR",
     "window_partition",
     "window_reverse",
@@ -40,6 +41,45 @@ __all__ = [
     "BasicLayer",
     "SwinTransformer",
 ]
+
+class ResBlock3d(nn.Module):
+    def __init__(
+            self, 
+            n_in: int = 1, 
+            n_out: int = 24, 
+            stride: int = 1,
+        ):
+
+        super(ResBlock3d, self).__init__()
+        self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
+                               stride=stride, padding=1)
+        self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
+      
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
+        self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
+
+        if stride != 1 or n_out != n_in:
+            self.shortcut = nn.Sequential(
+                nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
+                nn.BatchNorm3d(n_out, momentum=0.1),
+            )
+        else:
+            self.shortcut = None
+
+    def forward(self, x):
+        residual = x
+        if self.shortcut is not None:
+            residual = self.shortcut(x)
+        out = self.conv1(x)
+        out = self.norm1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.norm2(out)
+
+        out += residual
+        out = self.relu(out)
+        return out
 
 
 
@@ -131,15 +171,9 @@ class SwinUNETR(nn.Module):
         self.normalize = normalize
 
         self.preBlock = nn.Sequential(
-            UnetrBasicBlock(
-                spatial_dims=spatial_dims, in_channels=in_channels, out_channels=feature_size, kernel_size=3, stride=2, norm_name=norm_name,res_block=True
-            ),
-            UnetrBasicBlock(
-                spatial_dims=spatial_dims, in_channels=feature_size, out_channels=feature_size, kernel_size=3, stride=1, norm_name=norm_name,res_block=True
-            ),
-            UnetrBasicBlock(
-                spatial_dims=spatial_dims, in_channels=feature_size, out_channels=feature_size, kernel_size=3, stride=1, norm_name=norm_name,res_block=True
-            ),      
+            ResBlock3d(n_in=in_channels, n_out=feature_size, stride=2),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
+            ResBlock3d(n_in=feature_size, n_out=feature_size, stride=1),
         )
 
         self.swinViT = SwinTransformer(
