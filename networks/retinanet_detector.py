@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 import numpy as np
 import torch
 from torch import Tensor, nn
+import torch.nn.functional as F
 
 from .anchor_utils import AnchorGenerator
 from .ATSS_matcher import ATSSMatcher
@@ -21,6 +22,44 @@ BalancedPositiveNegativeSampler, _ = optional_import(
     "torchvision.models.detection._utils", name="BalancedPositiveNegativeSampler"
 )
 Matcher, _ = optional_import("torchvision.models.detection._utils", name="Matcher")
+
+
+class FalsePositiveHead(nn.Module):
+    def __init__(
+        self, in_channels: int, num_classes: int, crop_size: Tuple,
+    ):
+        """
+        Initializes the FalsePositiveHead module.
+
+        Args:
+            in_channels (int): Number of input channels.
+            num_classes (int): Number of classes for classification.
+            crop_size (Tuple): Size of the input crops.
+
+        """
+        super().__init__()
+        self.fc1 = nn.Linear(in_channels * crop_size[0] * crop_size[1] * crop_size[2], 512)
+        self.fc2 = nn.Linear(512, 256)
+
+        self.logits_out = nn.Linear(256, num_classes)
+        self.deltas_out = nn.Linear(256, num_classes * 6)
+
+    def forward(self, crops: List[Tensor]) -> List[Tensor]:
+        logits, deltas = [], []
+        for batch in crops:
+            x = batch.view(batch.size(0), -1)
+
+            x = F.relu(self.fc1(x), inplace=True)
+            x = F.relu(self.fc2(x), inplace=True)
+
+            batch_logits = self.logits_out(x)
+            batch_deltas = self.deltas_out(x)
+
+            logits.append(batch_logits)
+            deltas.append(batch_deltas)
+
+        return logits, deltas
+
 
 
 class RetinaNetDetector(nn.Module):
@@ -117,6 +156,7 @@ class RetinaNetDetector(nn.Module):
         # keys for the network output
         self.cls_key = self.network.cls_key
         self.box_reg_key = self.network.box_reg_key
+        self.feature_key = self.network.feature_key
 
         # check if anchor_generator matches with network
         self.anchor_generator = anchor_generator
@@ -165,6 +205,8 @@ class RetinaNetDetector(nn.Module):
             detections_per_img=300,
             apply_sigmoid=True,
         )
+
+        self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
 
     def set_box_coder_weights(self, weights: Tuple[float]):
         """
@@ -445,6 +487,15 @@ class RetinaNetDetector(nn.Module):
                     head_outputs_list[i], [self.anchors[i]], [image_sizes[i]], num_anchor_locs_per_level  # type: ignore
                 )
                 detections.append(detection)
+
+            feature_maps = head_outputs[self.feature_key][0]
+            crop_inputs = self.crop_roi([f.unsqueeze(0) for f in feature_maps], input_images, detections)
+
+            logits, deltas = self.fps_head(crop_inputs)
+
+
+            
+
 
         # 6(1). If during training, return losses
         if self.training:
@@ -910,35 +961,30 @@ class RetinaNetDetector(nn.Module):
 
         return box_regression_per_image_, matched_gt_boxes_per_image_
 
-    def crop_roi(self, f, inputs, proposals):
-        self.DEPTH, self.HEIGHT, self.WIDTH = inputs.shape[2:]
+    def crop_roi(
+            self, features: List[Tensor], inputs: List[Tensor], proposals: List[List[Dict[str, Tensor]]], scale: int = 4, crop_size: Tuple = (7, 7, 7)
+        ):
+        crops_list = []
+        for i in range(len(features)):    
+            feature, input_image, proposal = features[i], inputs[i], proposals[i][0]['box']  
+            d, h, w = input_image.shape[1:]
+            crops = []
+            for p in proposal:
+                minimum = torch.LongTensor([[0, 0, 0]]).cuda()
+                maximum = torch.LongTensor(np.array([[d, h, w]]) / scale).cuda()
 
-        crops = []
-        for p in proposals:
-            b = int(p[0])
-            center = p[2:5]
-            side_length = p[5:8]
-            c0 = center - side_length / 2  # left bottom corner
-            c1 = c0 + side_length  # right upper corner
-            c0 = (c0 / self.scale).floor().long()
-            c1 = (c1 / self.scale).ceil().long()
-            minimum = torch.LongTensor([[0, 0, 0]]).cuda()
-            maximum = torch.LongTensor(
-                np.array([[self.DEPTH, self.HEIGHT, self.WIDTH]]) / self.scale).cuda()
+                c0, _ = torch.max(torch.cat(((p[:3] / scale).floor().long().unsqueeze(0).cuda(), minimum), 0), 0)
+                c1, _ = torch.min(torch.cat(((p[3:] / scale).ceil().long().unsqueeze(0).cuda(), maximum), 0), 0)
 
-            c0 = torch.cat((c0.unsqueeze(0).cuda(), minimum), 0)
-            c1 = torch.cat((c1.unsqueeze(0).cuda(), maximum), 0)
-            c0, _ = torch.max(c0, 0)
-            c1, _ = torch.min(c1, 0)
+                # Slice 0 dim, should never happen
+                if np.any((c1 - c0).cpu().data.numpy() < 1):
+                    print(p)
+                    print('c0:', c0, ', c1:', c1)
+                crop = feature[:, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
+                crop = F.adaptive_max_pool3d(crop, crop_size)
+                crops.append(crop)
 
-            # Slice 0 dim, should never happen
-            if np.any((c1 - c0).cpu().data.numpy() < 1):
-                print(p)
-                print('c0:', c0, ', c1:', c1)
-            crop = f[b, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
-            crop = F.adaptive_max_pool3d(crop, self.rcnn_crop_size)
-            crops.append(crop)
+            crops = torch.stack(crops)
+            crops_list.append(crops.squeeze(1))
 
-        crops = torch.stack(crops)
-
-        return crops
+        return crops_list
