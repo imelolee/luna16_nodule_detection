@@ -180,8 +180,7 @@ class RetinaNetDetector(nn.Module):
         self.set_box_regression_loss(
             torch.nn.SmoothL1Loss(beta=1.0 / 9, reduction="mean"), encode_gt=True, decode_pred=False
         )  # box regression loss
-        if use_false_positive_reduction:
-            self.set_fps_loss(torch.nn.BCEWithLogitsLoss(reduction="mean"))
+        self.set_fps_loss(torch.nn.BCEWithLogitsLoss(reduction="mean"))
 
         # default setting for both training and inference
         # can be updated by self.set_box_coder_weights(*)
@@ -205,8 +204,8 @@ class RetinaNetDetector(nn.Module):
             detections_per_img=300,
             apply_sigmoid=True,
         )
-        if use_false_positive_reduction:
-            self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
+
+        self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
 
     def set_box_coder_weights(self, weights: Tuple[float]):
         """
@@ -684,6 +683,8 @@ class RetinaNetDetector(nn.Module):
         losses_box_regression = self.compute_box_loss(
             head_outputs_reshape[self.box_reg_key], targets, anchors, matched_idxs
         )
+        losses_fps = 0
+
         if use_false_positive_reduction:
             assert len(targets) == len(detections)
             iou_targets = []

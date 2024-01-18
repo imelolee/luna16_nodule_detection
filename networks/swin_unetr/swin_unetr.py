@@ -54,11 +54,11 @@ class ResBlock3d(nn.Module):
         self.conv1 = nn.Conv3d(n_in, n_out, kernel_size=3,
                                stride=stride, padding=1)
         self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
-      
+    
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
         self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
-
+       
         if stride != 1 or n_out != n_in:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(n_in, n_out, kernel_size=1, stride=stride),
@@ -196,7 +196,7 @@ class SwinUNETR(nn.Module):
 
         self.encoder1 = UnetrBasicBlock(
             spatial_dims=spatial_dims,
-            in_channels=in_channels,
+            in_channels=feature_size,
             out_channels=feature_size,
             kernel_size=3,
             stride=1,
@@ -206,16 +206,6 @@ class SwinUNETR(nn.Module):
 
         self.encoder2 = UnetrBasicBlock(
             spatial_dims=spatial_dims,
-            in_channels=feature_size,
-            out_channels=feature_size,
-            kernel_size=3,
-            stride=1,
-            norm_name=norm_name,
-            res_block=True,
-        )
-
-        self.encoder3 = UnetrBasicBlock(
-            spatial_dims=spatial_dims,
             in_channels=2 * feature_size,
             out_channels=2 * feature_size,
             kernel_size=3,
@@ -224,7 +214,7 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.encoder4 = UnetrBasicBlock(
+        self.encoder3 = UnetrBasicBlock(
             spatial_dims=spatial_dims,
             in_channels=4 * feature_size,
             out_channels=4 * feature_size,
@@ -234,7 +224,17 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.encoder10 = UnetrBasicBlock(
+        self.encoder4 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=8 * feature_size,
+            out_channels=8 * feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
+        )
+
+        self.encoder5 = UnetrBasicBlock(
             spatial_dims=spatial_dims,
             in_channels=16 * feature_size,
             out_channels=16 * feature_size,
@@ -244,7 +244,7 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.decoder5 = UnetrUpBlock(
+        self.decoder4 = UnetrUpBlock(
             spatial_dims=spatial_dims,
             in_channels=16 * feature_size,
             out_channels=8 * feature_size,
@@ -254,7 +254,7 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.decoder4 = UnetrUpBlock(
+        self.decoder3 = UnetrUpBlock(
             spatial_dims=spatial_dims,
             in_channels=feature_size * 8,
             out_channels=feature_size * 4,
@@ -264,7 +264,7 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.decoder3 = UnetrUpBlock(
+        self.decoder2 = UnetrUpBlock(
             spatial_dims=spatial_dims,
             in_channels=feature_size * 4,
             out_channels=feature_size * 2,
@@ -273,7 +273,7 @@ class SwinUNETR(nn.Module):
             norm_name=norm_name,
             res_block=True,
         )
-        self.decoder2 = UnetrUpBlock(
+        self.decoder1 = UnetrUpBlock(
             spatial_dims=spatial_dims,
             in_channels=feature_size * 2,
             out_channels=feature_size,
@@ -283,32 +283,19 @@ class SwinUNETR(nn.Module):
             res_block=True,
         )
 
-        self.decoder1 = UnetrUpBlock(
-            spatial_dims=spatial_dims,
-            in_channels=feature_size,
-            out_channels=feature_size,
-            kernel_size=3,
-            upsample_kernel_size=2,
-            norm_name=norm_name,
-            res_block=True,
-        )
-
-        self.out1 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
-        self.out2 = UnetOutBlock(spatial_dims=spatial_dims, in_channels=feature_size * 2, out_channels=out_channels)
-
-
     def forward(self, x_in):
         x_in = self.preBlock(x_in) # 1/2
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
-        enc1 = self.encoder2(hidden_states_out[0]) # 48, 1/2
-        enc2 = self.encoder3(hidden_states_out[1]) # 96, 1/4
-        enc3 = self.encoder4(hidden_states_out[2]) # 192, 1/8
-        dec4 = self.encoder10(hidden_states_out[4]) # 762, 1/32
-        dec3 = self.decoder5(dec4, hidden_states_out[3]) # 384, 1/16
-        dec2 = self.decoder4(dec3, enc3) # 192, 1/8
-        dec1 = self.decoder3(dec2, enc2) # 96, 1/4
-        dec0 = self.decoder2(dec1, enc1) # 48, 1/2
+        enc1 = self.encoder1(hidden_states_out[0]) # 48, 1/2
+        enc2 = self.encoder2(hidden_states_out[1]) # 96, 1/4
+        enc3 = self.encoder3(hidden_states_out[2]) # 192, 1/8
+        enc4 = self.encoder4(hidden_states_out[3]) # 762, 1/32
+        dec4 = self.encoder5(hidden_states_out[4]) # 762, 1/32
+        dec3 = self.decoder4(dec4, enc4) # 384, 1/16
+        dec2 = self.decoder3(dec3, enc3) # 192, 1/8
+        dec1 = self.decoder2(dec2, enc2) # 96, 1/4
+        dec0 = self.decoder1(dec1, enc1) # 48, 1/2
     
         return {'0': dec0, '1': dec1}
 

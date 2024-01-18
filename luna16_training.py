@@ -37,7 +37,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,0'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -216,7 +216,7 @@ def main():
         )
 
         # 3) build detector
-        detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, use_false_positive_reduction=True, debug=False).to(device)
+        detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, use_false_positive_reduction=False, debug=False).to(device)
 
         # set training components
         detector.set_atss_matcher(num_candidates=4, center_in_gt=False)
