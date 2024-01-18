@@ -42,10 +42,10 @@ class FalsePositiveHead(nn.Module):
         self.fc2 = nn.Linear(512, 256)
 
         self.logits_out = nn.Linear(256, num_classes)
-        self.deltas_out = nn.Linear(256, num_classes * 6)
+    
 
     def forward(self, crops: List[Tensor]) -> List[Tensor]:
-        logits, deltas = [], []
+        logits= []
         for batch in crops:
             x = batch.view(batch.size(0), -1)
 
@@ -53,12 +53,10 @@ class FalsePositiveHead(nn.Module):
             x = F.relu(self.fc2(x), inplace=True)
 
             batch_logits = self.logits_out(x)
-            batch_deltas = self.deltas_out(x)
 
             logits.append(batch_logits)
-            deltas.append(batch_deltas)
 
-        return logits, deltas
+        return logits
 
 
 
@@ -182,6 +180,8 @@ class RetinaNetDetector(nn.Module):
         self.set_box_regression_loss(
             torch.nn.SmoothL1Loss(beta=1.0 / 9, reduction="mean"), encode_gt=True, decode_pred=False
         )  # box regression loss
+        if use_false_positive_reduction:
+            self.set_fps_loss(torch.nn.BCEWithLogitsLoss(reduction="mean"))
 
         # default setting for both training and inference
         # can be updated by self.set_box_coder_weights(*)
@@ -205,8 +205,8 @@ class RetinaNetDetector(nn.Module):
             detections_per_img=300,
             apply_sigmoid=True,
         )
-
-        self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
+        if use_false_positive_reduction:
+            self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
 
     def set_box_coder_weights(self, weights: Tuple[float]):
         """
@@ -273,6 +273,9 @@ class RetinaNetDetector(nn.Module):
         self.encode_gt = encode_gt
         self.decode_pred = decode_pred
 
+    def set_fps_loss(self, fps_loss: nn.Module) -> None:
+        self.fps_loss_func = fps_loss
+    
     def set_regular_matcher(self, fg_iou_thresh: float, bg_iou_thresh: float, allow_low_quality_matches=True) -> None:
         """
         Using for training. Set torchvision matcher that matches anchors with ground truth boxes.
@@ -491,15 +494,11 @@ class RetinaNetDetector(nn.Module):
             feature_maps = head_outputs[self.feature_key][0]
             crop_inputs = self.crop_roi([f.unsqueeze(0) for f in feature_maps], input_images, detections)
 
-            logits, deltas = self.fps_head(crop_inputs)
-
-
-            
-
+            fps_out = self.fps_head(crop_inputs)
 
         # 6(1). If during training, return losses
         if self.training:
-            losses = self.compute_loss(head_outputs, targets, self.anchors, num_anchor_locs_per_level)  # type: ignore
+            losses = self.compute_loss(head_outputs, targets, self.anchors, num_anchor_locs_per_level, self.use_false_positive_reduction, detections, fps_out)  # type: ignore
             return losses
 
         # 6(2). If during inference, return detection results
@@ -659,6 +658,10 @@ class RetinaNetDetector(nn.Module):
         targets: List[Dict[str, Tensor]],
         anchors: List[Tensor],
         num_anchor_locs_per_level: Sequence[int],
+        use_false_positive_reduction: bool = False,
+        detections: List = None,
+        fps_out: List[Tensor] = None,
+        iou_thresholds: float = 0.2,
     ) -> Dict[str, Tensor]:
         """
         Compute losses.
@@ -681,7 +684,24 @@ class RetinaNetDetector(nn.Module):
         losses_box_regression = self.compute_box_loss(
             head_outputs_reshape[self.box_reg_key], targets, anchors, matched_idxs
         )
-        return {self.cls_key: losses_cls, self.box_reg_key: losses_box_regression}
+        if use_false_positive_reduction:
+            assert len(targets) == len(detections)
+            iou_targets = []
+
+            for i in range(len(targets)):
+                target, detection = targets[i]['box'], detections[i][0]['box']
+                if len(target) > 0:
+                    iou_score_list = [self.box_overlap_metric(detection, box.unsqueeze(0)) for box in target]
+                    iou_score = torch.cat(iou_score_list, dim=1)
+                    iou_score, _ = torch.max(iou_score, dim=1)
+                    iou_target = (iou_score > iou_thresholds).float().cuda()
+                else:
+                    iou_target = torch.zeros(detection.shape[0]).float().cuda()
+                iou_targets.append(iou_target)
+
+            losses_fps = self.compute_fps_loss(fps_out, iou_targets)
+
+        return {self.cls_key: losses_cls, self.box_reg_key: losses_box_regression, "fps": losses_fps}
 
     def compute_anchor_matched_idxs(
         self, anchors: List[Tensor], targets: List[Dict[str, Tensor]], num_anchor_locs_per_level: Sequence[int]
@@ -832,6 +852,24 @@ class RetinaNetDetector(nn.Module):
 
         return losses
 
+    def compute_fps_loss(self, fps_out: List[Tensor], iou_targets: List[Tensor]) -> Tensor:
+        """
+        Compute false positive reduction loss.
+
+        Args:
+            fps_out: false positive reduction results, sized (B, 1)
+            iou_targets: iou targets, sized (B, 1)
+
+        Return:
+            false positive reduction losses.
+        """
+        losses = 0
+        for i in range(len(fps_out)):
+            logits, target = fps_out[i], iou_targets[i].unsqueeze(1)
+            losses += self.fps_loss_func(logits, target)
+
+        return losses / len(fps_out)
+    
     def get_cls_train_sample_per_image(
         self, cls_logits_per_image: Tensor, targets_per_image: Dict[str, Tensor], matched_idxs_per_image: Tensor
     ) -> Tuple[Tensor, Tensor]:

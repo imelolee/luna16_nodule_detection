@@ -3,3 +3,5 @@ tfevent_train/
 trained_results/
 .vscode/
 __pycache__/
+
+test.ipynb

@@ -115,7 +115,7 @@ def main():
     print(f"Load model from {env_dict['model_path']}")
 
     # 3) build detector
-    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False)
+    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, use_false_positive_reduction=True, debug=False)
 
     # set inference components
     detector.set_box_selector_parameters(
