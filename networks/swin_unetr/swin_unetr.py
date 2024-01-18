@@ -195,36 +195,55 @@ class SwinUNETR(nn.Module):
             downsample=look_up_option(downsample, MERGING_MODE) if isinstance(downsample, str) else downsample,
         )
 
-        self.encoder1 = nn.Sequential(
-            ResBlock3d(n_in=feature_size, n_out=feature_size),
-            ResBlock3d(n_in=feature_size, n_out=feature_size),
-            ResBlock3d(n_in=feature_size, n_out=feature_size),
+        self.encoder1 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=feature_size,
+            out_channels=feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
         )
 
-        self.encoder2 = nn.Sequential(
-            ResBlock3d(n_in=2*feature_size, n_out=2*feature_size),
-            ResBlock3d(n_in=2*feature_size, n_out=2*feature_size),
-            ResBlock3d(n_in=2*feature_size, n_out=2*feature_size),
+        self.encoder2 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=2 * feature_size,
+            out_channels=2 * feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
         )
 
-        self.encoder3 = nn.Sequential(
-            ResBlock3d(n_in=4*feature_size, n_out=4*feature_size),
-            ResBlock3d(n_in=4*feature_size, n_out=4*feature_size),
-            ResBlock3d(n_in=4*feature_size, n_out=4*feature_size),
+        self.encoder3 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=4 * feature_size,
+            out_channels=4 * feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
         )
 
-        self.encoder4 = nn.Sequential(
-            ResBlock3d(n_in=8*feature_size, n_out=8*feature_size),
-            ResBlock3d(n_in=8*feature_size, n_out=8*feature_size),
-            ResBlock3d(n_in=8*feature_size, n_out=8*feature_size),
+        self.encoder4 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=8 * feature_size,
+            out_channels=8 * feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
         )
 
-        self.encoder5 = nn.Sequential(
-            ResBlock3d(n_in=16*feature_size, n_out=16*feature_size),
-            ResBlock3d(n_in=16*feature_size, n_out=16*feature_size),
-            ResBlock3d(n_in=16*feature_size, n_out=16*feature_size),
+        self.encoder5 = UnetrBasicBlock(
+            spatial_dims=spatial_dims,
+            in_channels=16 * feature_size,
+            out_channels=16 * feature_size,
+            kernel_size=3,
+            stride=1,
+            norm_name=norm_name,
+            res_block=True,
         )
-     
 
         self.decoder4 = UnetrUpBlock(
             spatial_dims=spatial_dims,
@@ -272,7 +291,7 @@ class SwinUNETR(nn.Module):
         enc1 = self.encoder1(hidden_states_out[0]) # 48, 1/2
         enc2 = self.encoder2(hidden_states_out[1]) # 96, 1/4
         enc3 = self.encoder3(hidden_states_out[2]) # 192, 1/8
-        enc4 = self.encoder4(hidden_states_out[3]) # 192, 1/8
+        enc4 = self.encoder4(hidden_states_out[3]) # 762, 1/32
         dec4 = self.encoder5(hidden_states_out[4]) # 762, 1/32
         dec3 = self.decoder4(dec4, enc4) # 384, 1/16
         dec2 = self.decoder3(dec3, enc3) # 192, 1/8

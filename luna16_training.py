@@ -37,7 +37,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,0'
 setproctitle.setproctitle("detection")
 
 def main():
