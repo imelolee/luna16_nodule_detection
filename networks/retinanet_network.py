@@ -79,7 +79,7 @@ class RetinaNetClassificationHead(nn.Module):
         for _ in range(4):
             conv.append(conv_type(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
             conv.append(nn.GroupNorm(num_groups=8, num_channels=in_channels))
-            conv.append(nn.ReLU())
+            conv.append(nn.LeakyReLU())
         self.conv = nn.Sequential(*conv)
 
         for layer in self.conv.children():
@@ -150,7 +150,7 @@ class RetinaNetRegressionHead(nn.Module):
         for _ in range(4):
             conv.append(conv_type(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
             conv.append(nn.GroupNorm(num_groups=8, num_channels=in_channels))
-            conv.append(nn.ReLU())
+            conv.append(nn.LeakyReLU())
 
         self.conv = nn.Sequential(*conv)
 
@@ -292,7 +292,7 @@ class RetinaNet(nn.Module):
 
         self.cls_key: str = "classification"
         self.box_reg_key: str = "box_regression"
-        self.feature_key: str = "feature_map"
+        self.fps_key: str = "fps_reduction"
 
     def forward(self, images: Tensor) -> Dict[str, List[Tensor]]:
         """
@@ -335,7 +335,7 @@ class RetinaNet(nn.Module):
 
         head_outputs: Dict[str, List[Tensor]] = {self.cls_key: cls_out}
         head_outputs[self.box_reg_key] = reg_out
-        head_outputs[self.feature_key] = feature_maps[0] # (bs, 256, 32, 32, 32)
+        head_outputs[self.fps_key] = feature_maps[0] # (bs, 256, 32, 32, 32)
 
         return head_outputs
 

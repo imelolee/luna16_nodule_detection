@@ -55,7 +55,7 @@ class ResBlock3d(nn.Module):
                                stride=stride, padding=1)
         self.norm1 = nn.BatchNorm3d(n_out, momentum=0.1)
     
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(inplace=True)
         self.conv2 = nn.Conv3d(n_out, n_out, kernel_size=3, padding=1)
         self.norm2 = nn.BatchNorm3d(n_out, momentum=0.1)
        

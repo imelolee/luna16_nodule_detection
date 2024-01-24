@@ -3,9 +3,9 @@
 	"lr": 1e-2,
 	"spacing": [0.703125, 0.703125, 1.25],
 	"batch_size": 1,
-	"batch_size_per_image": 2,
+	"batch_size_per_image": 4,
 	"patch_size": [128,128,128],
-	"val_patch_size": [256,256,128],
+	"val_patch_size": [256,256,256],
 	"fg_labels": [0],
 	"n_input_channels": 1,
 	"spatial_dims": 3,
@@ -16,5 +16,7 @@
 	"base_anchor_shapes": [[6,8,4],[8,6,5],[10,10,6]],
 	"balanced_sampler_pos_fraction": 0.3,
 	"block_inplanes": [64, 128, 256, 512],
-	"train_parallel": true
+	"train_parallel": true,
+	"fps_start_epoch": 60,
+	"resume_checkpoint": false
 }

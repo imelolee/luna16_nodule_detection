@@ -7,11 +7,12 @@ import torch.nn.functional as F
 
 from .anchor_utils import AnchorGenerator
 from .ATSS_matcher import ATSSMatcher
+from .losses import BCEWithWeights
+from monai.apps.detection.utils.predict_utils import ensure_dict_value_to_list_, predict_with_inferer
 from monai.apps.detection.utils.box_coder import BoxCoder
 from monai.apps.detection.utils.box_selector import BoxSelector
 from monai.apps.detection.utils.detector_utils import check_training_targets, preprocess_images
 from monai.apps.detection.utils.hard_negative_sampler import HardNegativeSampler
-from monai.apps.detection.utils.predict_utils import ensure_dict_value_to_list_, predict_with_inferer
 from monai.data.box_utils import box_iou
 from monai.inferers import SlidingWindowInferer
 from monai.utils import BlendMode, PytorchPadMode, ensure_tuple_rep, optional_import
@@ -43,16 +44,20 @@ class FalsePositiveHead(nn.Module):
 
         self.logits_out = nn.Linear(256, num_classes)
     
+    
 
     def forward(self, crops: List[Tensor]) -> List[Tensor]:
         logits= []
         for batch in crops:
-            x = batch.view(batch.size(0), -1)
+            if len(batch) != 0:
+                x = batch.view(batch.size(0), -1)
 
-            x = F.relu(self.fc1(x), inplace=True)
-            x = F.relu(self.fc2(x), inplace=True)
+                x = F.relu(self.fc1(x), inplace=True)
+                x = F.relu(self.fc2(x), inplace=True)
 
-            batch_logits = self.logits_out(x)
+                batch_logits = self.logits_out(x)
+            else: 
+                batch_logits = torch.Tensor()
 
             logits.append(batch_logits)
 
@@ -134,7 +139,7 @@ class RetinaNetDetector(nn.Module):
     """
 
     def __init__(
-        self, network, anchor_generator: AnchorGenerator, use_false_positive_reduction: bool = False, box_overlap_metric: Callable = box_iou, debug: bool = False
+        self, network, anchor_generator: AnchorGenerator, box_overlap_metric: Callable = box_iou, debug: bool = False
     ):
         super().__init__()
 
@@ -154,12 +159,12 @@ class RetinaNetDetector(nn.Module):
         # keys for the network output
         self.cls_key = self.network.cls_key
         self.box_reg_key = self.network.box_reg_key
-        self.feature_key = self.network.feature_key
+        self.fps_key = self.network.fps_key
 
         # check if anchor_generator matches with network
         self.anchor_generator = anchor_generator
 
-        self.use_false_positive_reduction = use_false_positive_reduction
+        self.use_fps = False
         self.num_anchors_per_loc = self.anchor_generator.num_anchors_per_location()[0]
         if self.num_anchors_per_loc != self.network.num_anchors:
             raise ValueError(
@@ -180,7 +185,7 @@ class RetinaNetDetector(nn.Module):
         self.set_box_regression_loss(
             torch.nn.SmoothL1Loss(beta=1.0 / 9, reduction="mean"), encode_gt=True, decode_pred=False
         )  # box regression loss
-        self.set_fps_loss(torch.nn.BCEWithLogitsLoss(reduction="mean"))
+        self.set_fps_loss(BCEWithWeights())
 
         # default setting for both training and inference
         # can be updated by self.set_box_coder_weights(*)
@@ -188,8 +193,8 @@ class RetinaNetDetector(nn.Module):
 
         # default keys in the ground truth targets and predicted boxes,
         # can be updated by self.set_target_keys(*)
-        self.target_box_key = "boxes"
-        self.target_label_key = "labels"
+        self.target_box_key = "box"
+        self.target_label_key = "label"
         self.pred_score_key = self.target_label_key + "_scores"  # score key for the detected boxes
 
         # default setting for inference,
@@ -205,7 +210,7 @@ class RetinaNetDetector(nn.Module):
             apply_sigmoid=True,
         )
 
-        self.fps_head = FalsePositiveHead(in_channels=256, num_classes=1, crop_size=(7, 7, 7))
+        self.fps_head = FalsePositiveHead(in_channels=256, num_classes=2, crop_size=(7, 7, 7))
 
     def set_box_coder_weights(self, weights: Tuple[float]):
         """
@@ -229,6 +234,9 @@ class RetinaNetDetector(nn.Module):
         self.target_box_key = box_key
         self.target_label_key = label_key
         self.pred_score_key = label_key + "_scores"
+
+    def set_fps_reduction(self, use_fps: bool):
+        self.use_fps = use_fps
 
     def set_cls_loss(self, cls_loss: nn.Module) -> None:
         """
@@ -473,38 +481,48 @@ class RetinaNetDetector(nn.Module):
             # or (B, sum(HWA), 2* self.spatial_dims) for self.box_reg_key
             # A = self.num_anchors_per_loc
             head_outputs[key] = self._reshape_maps(head_outputs[key])
-        
-        if self.use_false_positive_reduction:
-            head_outputs_list = []
 
-            for i in range(len(self.anchors)):
-                head_outputs_list.append({
+        detections, fps_out = [], []
+        if self.use_fps:
+            head_outputs_list = [
+                {
                     self.cls_key: head_outputs[self.cls_key][i].unsqueeze(0),
                     self.box_reg_key: head_outputs[self.box_reg_key][i].unsqueeze(0),
-                })
+                }
+                for i in range(len(self.anchors))
+            ]
 
-            detections = []
-            for i in range(len(self.anchors)):
-                detection = self.postprocess_detections(
-                    head_outputs_list[i], [self.anchors[i]], [image_sizes[i]], num_anchor_locs_per_level  # type: ignore
+            detections = [
+                self.postprocess_detections(
+                    head_outputs_list[i], [self.anchors[i]], [image_sizes[i]], num_anchor_locs_per_level
                 )
-                detections.append(detection)
+                for i in range(len(self.anchors))
+            ]
 
-            feature_maps = head_outputs[self.feature_key][0]
+            feature_maps = head_outputs[self.fps_key][0]
             crop_inputs = self.crop_roi([f.unsqueeze(0) for f in feature_maps], input_images, detections)
 
             fps_out = self.fps_head(crop_inputs)
+        
 
         # 6(1). If during training, return losses
         if self.training:
-            losses = self.compute_loss(head_outputs, targets, self.anchors, num_anchor_locs_per_level, self.use_false_positive_reduction, detections, fps_out)  # type: ignore
+            losses = self.compute_loss(head_outputs, targets, self.anchors, num_anchor_locs_per_level, detections, fps_out)  # type: ignore
             return losses
 
         # 6(2). If during inference, return detection results
         detections = self.postprocess_detections(
             head_outputs, self.anchors, image_sizes, num_anchor_locs_per_level  # type: ignore
         )
+        if self.use_fps:
+            detections[0]['label_scores'] = self.compute_fps_scores(detections, fps_out)
         return detections
+    
+    def compute_fps_scores(self, detections, fps_out, w_rpn=0.5, w_fps=0.5):
+        probs = F.softmax(fps_out[0], dim=1)
+        fps_scores = w_rpn * detections[0]['label_scores'] + w_fps * probs[:, 1]
+
+        return fps_scores
 
     def _check_detector_training_components(self):
         """
@@ -614,7 +632,8 @@ class RetinaNetDetector(nn.Module):
         # split outputs per level
         split_head_outputs: Dict[str, List[Tensor]] = {}
         for k in head_outputs_reshape:
-            split_head_outputs[k] = list(head_outputs_reshape[k].split(num_anchors_per_level, dim=1))
+            if k != self.fps_key:
+                split_head_outputs[k] = list(head_outputs_reshape[k].split(num_anchors_per_level, dim=1))
         split_anchors = [list(a.split(num_anchors_per_level)) for a in anchors]  # List[List[Tensor]]
 
         class_logits = split_head_outputs[self.cls_key]  # List[Tensor], each sized (B, HWA, self.num_classes)
@@ -657,7 +676,6 @@ class RetinaNetDetector(nn.Module):
         targets: List[Dict[str, Tensor]],
         anchors: List[Tensor],
         num_anchor_locs_per_level: Sequence[int],
-        use_false_positive_reduction: bool = False,
         detections: List = None,
         fps_out: List[Tensor] = None,
         iou_thresholds: float = 0.2,
@@ -685,24 +703,22 @@ class RetinaNetDetector(nn.Module):
         )
         losses_fps = 0
 
-        if use_false_positive_reduction:
+        if self.use_fps:
             assert len(targets) == len(detections)
             iou_targets = []
 
             for i in range(len(targets)):
                 target, detection = targets[i]['box'], detections[i][0]['box']
                 if len(target) > 0:
-                    iou_score_list = [self.box_overlap_metric(detection, box.unsqueeze(0)) for box in target]
-                    iou_score = torch.cat(iou_score_list, dim=1)
-                    iou_score, _ = torch.max(iou_score, dim=1)
-                    iou_target = (iou_score > iou_thresholds).float().cuda()
+                    iou_score, _ = torch.max(torch.cat([self.box_overlap_metric(detection, box.unsqueeze(0)) for box in target], dim=1), dim=1)
+                    iou_target = (iou_score > iou_thresholds).to(torch.int64).cuda()
                 else:
-                    iou_target = torch.zeros(detection.shape[0]).float().cuda()
+                    iou_target = torch.zeros(detection.shape[0], dtype=torch.int64).cuda()
                 iou_targets.append(iou_target)
 
             losses_fps = self.compute_fps_loss(fps_out, iou_targets)
 
-        return {self.cls_key: losses_cls, self.box_reg_key: losses_box_regression, "fps": losses_fps}
+        return {self.cls_key: losses_cls, self.box_reg_key: losses_box_regression, self.fps_key: losses_fps}
 
     def compute_anchor_matched_idxs(
         self, anchors: List[Tensor], targets: List[Dict[str, Tensor]], num_anchor_locs_per_level: Sequence[int]
@@ -866,8 +882,9 @@ class RetinaNetDetector(nn.Module):
         """
         losses = 0
         for i in range(len(fps_out)):
-            logits, target = fps_out[i], iou_targets[i].unsqueeze(1)
-            losses += self.fps_loss_func(logits, target)
+            logits, target = fps_out[i], iou_targets[i]
+            if len(logits) > 0:
+                losses += self.fps_loss_func(logits, target)
 
         return losses / len(fps_out)
     
@@ -1022,8 +1039,10 @@ class RetinaNetDetector(nn.Module):
                 crop = feature[:, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
                 crop = F.adaptive_max_pool3d(crop, crop_size)
                 crops.append(crop)
-
-            crops = torch.stack(crops)
-            crops_list.append(crops.squeeze(1))
+            if len(crops) != 0:
+                crops = torch.stack(crops).squeeze(1)
+            else: 
+                crops = torch.Tensor()
+            crops_list.append(crops)
 
         return crops_list

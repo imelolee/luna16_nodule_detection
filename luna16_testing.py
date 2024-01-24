@@ -115,7 +115,8 @@ def main():
     print(f"Load model from {env_dict['model_path']}")
 
     # 3) build detector
-    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, use_false_positive_reduction=True, debug=False)
+    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
+    detector.set_fps_reduction(True)
 
     # set inference components
     detector.set_box_selector_parameters(
@@ -143,10 +144,10 @@ def main():
                 inference_data_i["image_meta_dict"]["filename_or_obj"] for inference_data_i in inference_data
             ]
             print(inference_img_filenames)
-            use_inferer = not all(
-                [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
-            )
-            # use_inferer = True
+            # use_inferer = not all(
+            #     [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
+            # )
+            use_inferer = False
             inference_inputs = [pad2factor(inference_data_i["image"], factor=64).to(device) for inference_data_i in inference_data]
 
             if amp:
