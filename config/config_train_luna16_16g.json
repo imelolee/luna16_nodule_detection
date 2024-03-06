@@ -17,6 +17,5 @@
 	"balanced_sampler_pos_fraction": 0.3,
 	"block_inplanes": [64, 128, 256, 512],
 	"train_parallel": true,
-	"fps_start_epoch": 60,
 	"resume_checkpoint": false
 }

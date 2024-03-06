@@ -27,7 +27,7 @@ from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")
@@ -116,7 +116,6 @@ def main():
 
     # 3) build detector
     detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
-    detector.set_fps_reduction(True)
 
     # set inference components
     detector.set_box_selector_parameters(

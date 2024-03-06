@@ -12,13 +12,13 @@
 # limitations under the License.
 
 python ./luna16_post_combine_cross_fold_results.py \
-	-i ./trained_results/result_luna16_fold0.json \
-	-o ./trained_results/result_luna16_fold0.csv
+	-i ./trained_results/result_luna16_fold4.json \
+	-o ./trained_results/result_luna16_fold4.csv
 
 python ./evaluationScript/noduleCADEvaluationLUNA16.py \
 	./evaluationScript/annotations/new_annotations.csv  \
 	./evaluationScript/annotations/new_annotations_excluded.csv \
-	./LUNA16_datasplit/fold0.csv \
-	./trained_results/result_luna16_fold0.csv \
+	./LUNA16_datasplit/fold4.csv \
+	./trained_results/result_luna16_fold4.csv \
 	./trained_results
 

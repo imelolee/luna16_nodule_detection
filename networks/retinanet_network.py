@@ -116,7 +116,7 @@ class RetinaNetClassificationHead(nn.Module):
             feature_maps = x
 
         for features in feature_maps:
-            cls_logits = self.conv(features)
+            cls_logits = self.conv(features) # 256, 1/4
             cls_logits = self.cls_logits(cls_logits)
 
             cls_logits_maps.append(cls_logits)
@@ -292,7 +292,7 @@ class RetinaNet(nn.Module):
 
         self.cls_key: str = "classification"
         self.box_reg_key: str = "box_regression"
-        self.fps_key: str = "fps_reduction"
+
 
     def forward(self, images: Tensor) -> Dict[str, List[Tensor]]:
         """
@@ -335,7 +335,6 @@ class RetinaNet(nn.Module):
 
         head_outputs: Dict[str, List[Tensor]] = {self.cls_key: cls_out}
         head_outputs[self.box_reg_key] = reg_out
-        head_outputs[self.fps_key] = feature_maps[0] # (bs, 256, 32, 32, 32)
 
         return head_outputs
 

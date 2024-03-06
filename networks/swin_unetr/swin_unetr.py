@@ -287,15 +287,15 @@ class SwinUNETR(nn.Module):
         x_in = self.preBlock(x_in) # 1/2
         x_in = torch.cat([x.unsqueeze(0) for x in x_in], axis=0)
         hidden_states_out = self.swinViT(x_in, self.normalize)
-        enc1 = self.encoder1(hidden_states_out[0]) # 48, 1/2
-        enc2 = self.encoder2(hidden_states_out[1]) # 96, 1/4
-        enc3 = self.encoder3(hidden_states_out[2]) # 192, 1/8
-        enc4 = self.encoder4(hidden_states_out[3]) # 762, 1/32
-        dec4 = self.encoder5(hidden_states_out[4]) # 762, 1/32
-        dec3 = self.decoder4(dec4, enc4) # 384, 1/16
-        dec2 = self.decoder3(dec3, enc3) # 192, 1/8
-        dec1 = self.decoder2(dec2, enc2) # 96, 1/4
-        dec0 = self.decoder1(dec1, enc1) # 48, 1/2
+        enc1 = self.encoder1(hidden_states_out[0]) # 48, 1/4
+        enc2 = self.encoder2(hidden_states_out[1]) # 96, 1/8
+        enc3 = self.encoder3(hidden_states_out[2]) # 192, 1/16
+        enc4 = self.encoder4(hidden_states_out[3]) # 384, 1/32
+        dec4 = self.encoder5(hidden_states_out[4]) # 768, 1/64
+        dec3 = self.decoder4(dec4, enc4) # 384, 1/32
+        dec2 = self.decoder3(dec3, enc3) # 192, 1/16
+        dec1 = self.decoder2(dec2, enc2) # 96, 1/8
+        dec0 = self.decoder1(dec1, enc1) # 48, 1/4
     
         return {'0': dec0, '1': dec1}
 

@@ -25,6 +25,8 @@ from networks.retinanet_network import (
     fpn_feature_extractor,
 )
 from networks.swin_unetr.swin_unetr import SwinUNETR
+# from networks.swin_unetr.unetr import UNETR
+
 
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
@@ -37,7 +39,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -198,6 +200,7 @@ def main():
         #     block_inplanes=args.block_inplanes
         # )
 
+
         feature_extractor = fpn_feature_extractor(
             backbone=backbone,
             spatial_dims=args.spatial_dims,
@@ -251,7 +254,7 @@ def main():
             weight_decay=3e-5,
             nesterov=True,
         )
-        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
+        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
         scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=10, after_scheduler=after_scheduler)
         scaler = torch.cuda.amp.GradScaler() if amp else None
         optimizer.zero_grad()
@@ -312,22 +315,18 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 120
+    max_epochs = 200
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight of classification loss, default 1.0
     w_reg = config_dict.get("w_reg", 1.0)  # weight of box regression loss, default 1.0
-    w_fps = config_dict.get("w_fps", 1.0)  # weight of false positive reduce loss, default 1.0
     for epoch in range(max_epochs):
         # ------------- Training -------------
         print("-" * 10)
         print(f"epoch {epoch + 1}/{max_epochs}")
-        if epoch >= args.fps_start_epoch:
-            detector.set_fps_reduction(True)
         detector.train()
         epoch_loss = 0
         epoch_cls_loss = 0
         epoch_box_reg_loss = 0
-        epoch_fps_loss = 0
         step = 0
         start_time = time.time()
         if not args.resume_checkpoint:
@@ -353,13 +352,13 @@ def main():
             if amp and (scaler is not None):
                 with torch.cuda.amp.autocast():
                     outputs = detector(inputs, targets)
-                    loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key] + w_fps * outputs[detector.fps_key]
+                    loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key] 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 outputs = detector(inputs, targets)
-                loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key] + w_fps * outputs[detector.fps_key]
+                loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key]
                 loss.backward()
                 optimizer.step()
 
@@ -367,8 +366,6 @@ def main():
             epoch_loss += loss.detach().item()
             epoch_cls_loss += outputs[detector.cls_key].detach().item()
             epoch_box_reg_loss += outputs[detector.box_reg_key].detach().item()
-            if detector.use_fps:
-                epoch_fps_loss += outputs[detector.fps_key].detach().item()
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
             tensorboard_writer.add_scalar("train_loss", loss.detach().item(), epoch_len * epoch + step)
 
@@ -382,17 +379,12 @@ def main():
         epoch_loss /= step
         epoch_cls_loss /= step
         epoch_box_reg_loss /= step
-        epoch_fps_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
         tensorboard_writer.add_scalar("avg_train_loss", epoch_loss, epoch + 1)
         tensorboard_writer.add_scalar("avg_train_cls_loss", epoch_cls_loss, epoch + 1)
         tensorboard_writer.add_scalar("avg_train_box_reg_loss", epoch_box_reg_loss, epoch + 1)
-        if detector.use_fps:
-            tensorboard_writer.add_scalar("avg_train_fps_loss", epoch_fps_loss, epoch + 1)
         tensorboard_writer.add_scalar("train_lr", optimizer.param_groups[0]["lr"], epoch + 1)
-        if (epoch + 1) % 60 == 0:
-            torch.save(detector.network, env_dict["model_path"][:-3] + f"_{epoch + 1}.pt")
-
+    
         # save last trained model
         torch.save(detector.network, env_dict["model_path"][:-3] + "_last.pt")
         print("saved last model")
@@ -410,9 +402,9 @@ def main():
 
                     if amp:
                         with torch.cuda.amp.autocast():
-                            val_outputs = detector(val_inputs, use_inferer=False)
+                            val_outputs = detector(val_inputs, use_inferer=True)
                     else:
-                        val_outputs = detector(val_inputs, use_inferer=False)
+                        val_outputs = detector(val_inputs, use_inferer=True)
 
                     # save outputs for evaluation
                     val_outputs_all += val_outputs
