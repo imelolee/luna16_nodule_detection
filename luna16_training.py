@@ -24,8 +24,7 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.swin_unetr.swin_unetr import SwinUNETR
-# from networks.swin_unetr.unetr import UNETR
+from networks.swin_unetr.swin_unetr_no_res  import SwinUNETR
 
 
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
@@ -156,21 +155,6 @@ def main():
     if not args.resume_checkpoint:
         # 2) build network
 
-        # TiCnet / Swin-TiCnet
-        # backbone = FeatureNet(
-        #     in_channels = 1,
-        #     out_channels = 128,
-        # )
-
-        # Swin-TiCnet with dense block
-        # backbone = DenseFeatureNet(
-        #     in_channels = 1,
-        #     out_channels = 128, 
-        #     num_layers=4,
-        #     bn_size=4,
-        #     growth_rate=12
-        # )
-
         # Swin-UNETR
         backbone = SwinUNETR(
             img_size=(64, 64, 64),
@@ -190,16 +174,6 @@ def main():
             block_inplanes=args.block_inplanes
         )
    
-        # UNETR
-        # backbone = UNETR(
-        #     img_size=(128, 128, 128),
-        #     in_channels=1,
-        #     out_channels=128,
-        #     feature_size=48,
-        #     use_checkpoint=True,
-        #     block_inplanes=args.block_inplanes
-        # )
-
 
         feature_extractor = fpn_feature_extractor(
             backbone=backbone,
@@ -254,7 +228,7 @@ def main():
             weight_decay=3e-5,
             nesterov=True,
         )
-        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
+        after_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.1)
         scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=10, after_scheduler=after_scheduler)
         scaler = torch.cuda.amp.GradScaler() if amp else None
         optimizer.zero_grad()
@@ -315,7 +289,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 200
+    max_epochs = 300
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight of classification loss, default 1.0
     w_reg = config_dict.get("w_reg", 1.0)  # weight of box regression loss, default 1.0
