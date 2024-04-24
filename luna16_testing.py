@@ -27,7 +27,7 @@ from monai.data import DataLoader, Dataset, load_decathlon_datalist
 from monai.data.utils import no_collation
 from monai.transforms import ScaleIntensityRanged
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Testing")
@@ -115,7 +115,7 @@ def main():
     print(f"Load model from {env_dict['model_path']}")
 
     # 3) build detector
-    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False)
+    detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
 
     # set inference components
     detector.set_box_selector_parameters(
@@ -146,8 +146,8 @@ def main():
             use_inferer = not all(
                 [inference_data_i["image"][0, ...].numel() < np.prod(patch_size) for inference_data_i in inference_data]
             )
-            # use_inferer = True
-            inference_inputs = [pad2factor(inference_data_i["image"]).to(device) for inference_data_i in inference_data]
+            # use_inferer = False
+            inference_inputs = [pad2factor(inference_data_i["image"], factor=64).to(device) for inference_data_i in inference_data]
 
             if amp:
                 with torch.cuda.amp.autocast():

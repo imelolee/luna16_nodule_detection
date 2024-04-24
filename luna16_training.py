@@ -1,13 +1,3 @@
-# Copyright (c) MONAI Consortium
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#     http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import os
 import argparse
 import gc
@@ -34,9 +24,9 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.swin_ticnet.feature_net import FeatureNet
-from networks.swin_unetr import SwinUNETR
-from networks.unetr import UNETR
+from networks.swin_unetr.swin_unetr  import SwinUNETR
+
+
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
 from monai.data import DataLoader, Dataset, box_utils, load_decathlon_datalist
 from monai.data.utils import no_collation
@@ -48,7 +38,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3,2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -56,7 +46,7 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./config/environment_luna16_fold0.json",
+        default="./config/environment_luna16_fold9.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
@@ -70,7 +60,6 @@ def main():
     set_determinism(seed=0)
 
     amp = True
-    resume_checkpoint = False
 
     monai.config.print_config()
     torch.backends.cudnn.benchmark = True
@@ -100,7 +89,7 @@ def main():
         args.gt_box_mode,
         intensity_transform,
         args.patch_size,
-        args.batch_size,
+        batch_size=args.batch_size_per_image, # batch size per image not the input batch size
         affine_lps_to_ras=True,
         amp=amp,
     )
@@ -129,7 +118,7 @@ def main():
     )
     train_loader = DataLoader(
         train_ds,
-        batch_size=1,
+        batch_size=args.batch_size,
         shuffle=True,
         num_workers=7,
         pin_memory=torch.cuda.is_available(),
@@ -144,7 +133,7 @@ def main():
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=1,
+        batch_size=args.batch_size,
         num_workers=2,
         pin_memory=torch.cuda.is_available(),
         collate_fn=no_collation,
@@ -163,54 +152,28 @@ def main():
         base_anchor_shapes=args.base_anchor_shapes,
     )
 
-    if not resume_checkpoint:
+    if not args.resume_checkpoint:
         # 2) build network
-        # backbone = FeatureNet(
-        #     in_channels = 1,
-        #     out_channels = 128,
-        #     hidden_dim = 64,
-        #     position_embedding = 'sine',  
-        #     dropout = 0.1,
-        #     nheads = 8,
-        #     num_queries = 512,
-        #     dim_feedforward = 256,
-        #     num_encoder_layers = 6,
-        #     num_decoder_layers = 6,
-        #     normalize_before = None,
-        #     return_intermediate_dec =True       
-        # )
 
-        backbone = FeatureNet(
-            in_channels = 1,
-            out_channels = 128, 
+        # Swin-UNETR
+        backbone = SwinUNETR(
+            img_size=(64, 64, 64),
+            in_channels=1,
+            out_channels=128,
+            depths=(2, 2, 4, 6),
+            num_heads=(3, 6, 12, 24),
+            feature_size=48,
+            norm_name="instance",
+            drop_rate=0.1,
+            attn_drop_rate=0.1,
+            dropout_path_rate=0.1,
+            normalize=True,
+            use_checkpoint=False,
+            spatial_dims=3,
+            downsample="merging",
+            block_inplanes=args.block_inplanes
         )
-
-        # backbone = SwinUNETR(
-        #     img_size=(128, 128, 128),
-        #     in_channels=1,
-        #     out_channels=128,
-        #     depths=(2, 2, 2, 2),
-        #     num_heads=(3, 6, 12, 24),
-        #     feature_size=48,
-        #     norm_name="instance",
-        #     drop_rate=0.1,
-        #     attn_drop_rate=0.1,
-        #     dropout_path_rate=0.1,
-        #     normalize=True,
-        #     use_checkpoint=False,
-        #     spatial_dims=3,
-        #     downsample="merging",
-        #     block_inplanes=args.block_inplanes
-        # )
    
-        # backbone = UNETR(
-        #     img_size=(128, 128, 128),
-        #     in_channels=1,
-        #     out_channels=128,
-        #     feature_size=48,
-        #     use_checkpoint=True,
-        #     block_inplanes=args.block_inplanes
-        # )
 
         feature_extractor = fpn_feature_extractor(
             backbone=backbone,
@@ -225,6 +188,7 @@ def main():
             num_anchors=num_anchors,
             feature_extractor=feature_extractor,
             size_divisible=size_divisible,
+            train_parallel=args.train_parallel,
         )
 
         # 3) build detector
@@ -270,11 +234,12 @@ def main():
         optimizer.zero_grad()
         optimizer.step()
 
+    # load model from checkpoint
     else:
         net = torch.load(env_dict["model_path"]).to(device)
         print(f"Load model from {env_dict['model_path']}")
 
-         # 3) build detector
+        # 3) build detector
         detector = RetinaNetDetector(network=net, anchor_generator=anchor_generator, debug=False).to(device)
 
         # set training components
@@ -319,14 +284,15 @@ def main():
     tensorboard_writer = SummaryWriter(args.tfevent_path)
 
     # 5. train
-    val_interval = 5  # do validation every val_interval epochs
+    val_interval = 10  # do validation every val_interval epochs
     coco_metric = COCOMetric(classes=["nodule"], iou_list=[0.1], max_detection=[100])
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 300
+    max_epochs = 200
     epoch_len = len(train_ds) // train_loader.batch_size
-    w_cls = config_dict.get("w_cls", 1.0)  # weight between classification loss and box regression loss, default 1.0
+    w_cls = config_dict.get("w_cls", 1.0)  # weight of classification loss, default 1.0
+    w_reg = config_dict.get("w_reg", 1.0)  # weight of box regression loss, default 1.0
     for epoch in range(max_epochs):
         # ------------- Training -------------
         print("-" * 10)
@@ -337,7 +303,7 @@ def main():
         epoch_box_reg_loss = 0
         step = 0
         start_time = time.time()
-        if not resume_checkpoint:
+        if not args.resume_checkpoint:
             scheduler_warmup.step()
         # Training
         for batch_data in train_loader:
@@ -360,13 +326,13 @@ def main():
             if amp and (scaler is not None):
                 with torch.cuda.amp.autocast():
                     outputs = detector(inputs, targets)
-                    loss = w_cls * outputs[detector.cls_key] + outputs[detector.box_reg_key]
+                    loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key] 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 outputs = detector(inputs, targets)
-                loss = w_cls * outputs[detector.cls_key] + outputs[detector.box_reg_key]
+                loss = w_cls * outputs[detector.cls_key] + w_reg * outputs[detector.box_reg_key]
                 loss.backward()
                 optimizer.step()
 
@@ -392,7 +358,7 @@ def main():
         tensorboard_writer.add_scalar("avg_train_cls_loss", epoch_cls_loss, epoch + 1)
         tensorboard_writer.add_scalar("avg_train_box_reg_loss", epoch_box_reg_loss, epoch + 1)
         tensorboard_writer.add_scalar("train_lr", optimizer.param_groups[0]["lr"], epoch + 1)
-
+    
         # save last trained model
         torch.save(detector.network, env_dict["model_path"][:-3] + "_last.pt")
         print("saved last model")
@@ -405,19 +371,14 @@ def main():
             start_time = time.time()
             with torch.no_grad():
                 for val_data in val_loader:
-                    # if all val_data_i["image"] smaller than args.val_patch_size, no need to use inferer
-                    # otherwise, need inferer to handle large input images.
-                    use_inferer = not all(
-                        [val_data_i["image"][0, ...].numel() < np.prod(args.val_patch_size) for val_data_i in val_data]
-                    )
-                    # use_inferer = True
-                    val_inputs = [pad2factor(val_data_i.pop("image")).to(device) for val_data_i in val_data]
+                 
+                    val_inputs = [pad2factor(val_data_i.pop("image"), factor=64).to(device) for val_data_i in val_data]
 
                     if amp:
                         with torch.cuda.amp.autocast():
-                            val_outputs = detector(val_inputs, use_inferer=use_inferer)
+                            val_outputs = detector(val_inputs, use_inferer=True)
                     else:
-                        val_outputs = detector(val_inputs, use_inferer=use_inferer)
+                        val_outputs = detector(val_inputs, use_inferer=True)
 
                     # save outputs for evaluation
                     val_outputs_all += val_outputs

@@ -42,6 +42,7 @@ from typing import Callable, Dict, List, Sequence, Union
 
 import torch
 from torch import Tensor, nn
+from torch.nn.parallel import data_parallel
 
 from networks.build_fpn import BackboneWithFPN
 
@@ -78,7 +79,7 @@ class RetinaNetClassificationHead(nn.Module):
         for _ in range(4):
             conv.append(conv_type(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
             conv.append(nn.GroupNorm(num_groups=8, num_channels=in_channels))
-            conv.append(nn.ReLU())
+            conv.append(nn.LeakyReLU())
         self.conv = nn.Sequential(*conv)
 
         for layer in self.conv.children():
@@ -115,7 +116,7 @@ class RetinaNetClassificationHead(nn.Module):
             feature_maps = x
 
         for features in feature_maps:
-            cls_logits = self.conv(features)
+            cls_logits = self.conv(features) # 256, 1/4
             cls_logits = self.cls_logits(cls_logits)
 
             cls_logits_maps.append(cls_logits)
@@ -149,7 +150,7 @@ class RetinaNetRegressionHead(nn.Module):
         for _ in range(4):
             conv.append(conv_type(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
             conv.append(nn.GroupNorm(num_groups=8, num_channels=in_channels))
-            conv.append(nn.ReLU())
+            conv.append(nn.LeakyReLU())
 
         self.conv = nn.Sequential(*conv)
 
@@ -262,12 +263,15 @@ class RetinaNet(nn.Module):
         num_anchors: int,
         feature_extractor,
         size_divisible: Union[Sequence[int], int] = 1,
+        train_parallel: bool = False,
     ):
         super().__init__()
 
         self.spatial_dims = look_up_option(spatial_dims, supported=[1, 2, 3])
         self.num_classes = num_classes
         self.size_divisible = ensure_tuple_rep(size_divisible, self.spatial_dims)
+
+        self.train_parallel = train_parallel
 
         if not hasattr(feature_extractor, "out_channels"):
             raise ValueError(
@@ -289,6 +293,7 @@ class RetinaNet(nn.Module):
         self.cls_key: str = "classification"
         self.box_reg_key: str = "box_regression"
 
+
     def forward(self, images: Tensor) -> Dict[str, List[Tensor]]:
         """
         It takes an image tensor as inputs, and outputs a dictionary ``head_outputs``.
@@ -305,7 +310,10 @@ class RetinaNet(nn.Module):
 
         """
         # compute features maps list from the input images.
-        features = self.feature_extractor(images)
+        if self.train_parallel:
+            features = data_parallel(self.feature_extractor, images)
+        else:
+            features = self.feature_extractor(images)
         if isinstance(features, Tensor):
             feature_maps = [features]
         elif torch.jit.isinstance(features, Dict[str, Tensor]):
@@ -318,9 +326,15 @@ class RetinaNet(nn.Module):
 
         # compute classification and box regression maps from the feature maps
         # expandable for mask prediction in the future
+        if self.train_parallel:
+            cls_out = data_parallel(self.classification_head, feature_maps)
+            reg_out = data_parallel(self.regression_head, feature_maps)
+        else:
+            cls_out = self.classification_head(feature_maps)
+            reg_out = self.regression_head(feature_maps)
 
-        head_outputs: Dict[str, List[Tensor]] = {self.cls_key: self.classification_head(feature_maps)}
-        head_outputs[self.box_reg_key] = self.regression_head(feature_maps)
+        head_outputs: Dict[str, List[Tensor]] = {self.cls_key: cls_out}
+        head_outputs[self.box_reg_key] = reg_out
 
         return head_outputs
 
@@ -360,6 +374,6 @@ def fpn_feature_extractor(
 
 
     feature_extractor = BackboneWithFPN(
-        backbone, in_channels_list=[128, 64], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
+        backbone, in_channels_list=[48, 96], out_channels=256, extra_blocks=extra_blocks, spatial_dims=spatial_dims
     )
     return feature_extractor

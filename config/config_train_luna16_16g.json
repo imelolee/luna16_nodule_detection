@@ -2,7 +2,8 @@
 	"gt_box_mode": "cccwhd",
 	"lr": 1e-2,
 	"spacing": [0.703125, 0.703125, 1.25],
-	"batch_size": 4,
+	"batch_size": 1,
+	"batch_size_per_image": 4,
 	"patch_size": [128,128,128],
 	"val_patch_size": [256,256,128],
 	"fg_labels": [0],
@@ -14,5 +15,7 @@
 	"conv1_t_stride": [2,2,1],
 	"base_anchor_shapes": [[6,8,4],[8,6,5],[10,10,6]],
 	"balanced_sampler_pos_fraction": 0.3,
-	"block_inplanes": [64, 128, 256, 512]
+	"block_inplanes": [64, 128, 256, 512],
+	"train_parallel": true,
+	"resume_checkpoint": false
 }

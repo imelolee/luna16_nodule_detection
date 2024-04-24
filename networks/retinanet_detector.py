@@ -1,55 +1,18 @@
-# Copyright (c) MONAI Consortium
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#     http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# =========================================================================
-# Adapted from https://github.com/pytorch/vision/blob/main/torchvision/models/detection/retinanet.py
-# which has the following license...
-# https://github.com/pytorch/vision/blob/main/LICENSE
-
-# BSD 3-Clause License
-
-# Copyright (c) Soumith Chintala 2016,
-# All rights reserved.
-
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-
-# * Redistributions of source code must retain the above copyright notice, this
-#   list of conditions and the following disclaimer.
-
-# * Redistributions in binary form must reproduce the above copyright notice,
-#   this list of conditions and the following disclaimer in the documentation
-#   and/or other materials provided with the distribution.
-
-# * Neither the name of the copyright holder nor the names of its
-#   contributors may be used to endorse or promote products derived from
-#   this software without specific prior written permission.
-"""
-Part of this script is adapted from
-https://github.com/pytorch/vision/blob/main/torchvision/models/detection/retinanet.py
-"""
-
 import warnings
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
-
+import numpy as np
 import torch
 from torch import Tensor, nn
+import torch.nn.functional as F
 
-from monai.apps.detection.utils.anchor_utils import AnchorGenerator
-from monai.apps.detection.utils.ATSS_matcher import ATSSMatcher
+from .anchor_utils import AnchorGenerator
+from .ATSS_matcher import ATSSMatcher
+from .losses import BCEWithWeights
+from monai.apps.detection.utils.predict_utils import ensure_dict_value_to_list_, predict_with_inferer
 from monai.apps.detection.utils.box_coder import BoxCoder
 from monai.apps.detection.utils.box_selector import BoxSelector
 from monai.apps.detection.utils.detector_utils import check_training_targets, preprocess_images
 from monai.apps.detection.utils.hard_negative_sampler import HardNegativeSampler
-from monai.apps.detection.utils.predict_utils import ensure_dict_value_to_list_, predict_with_inferer
 from monai.data.box_utils import box_iou
 from monai.inferers import SlidingWindowInferer
 from monai.utils import BlendMode, PytorchPadMode, ensure_tuple_rep, optional_import
@@ -60,6 +23,46 @@ BalancedPositiveNegativeSampler, _ = optional_import(
     "torchvision.models.detection._utils", name="BalancedPositiveNegativeSampler"
 )
 Matcher, _ = optional_import("torchvision.models.detection._utils", name="Matcher")
+
+
+class FalsePositiveHead(nn.Module):
+    def __init__(
+        self, in_channels: int, num_classes: int, crop_size: Tuple,
+    ):
+        """
+        Initializes the FalsePositiveHead module.
+
+        Args:
+            in_channels (int): Number of input channels.
+            num_classes (int): Number of classes for classification.
+            crop_size (Tuple): Size of the input crops.
+
+        """
+        super().__init__()
+        self.fc1 = nn.Linear(in_channels * crop_size[0] * crop_size[1] * crop_size[2], 512)
+        self.fc2 = nn.Linear(512, 256)
+
+        self.logits_out = nn.Linear(256, num_classes)
+    
+    
+
+    def forward(self, crops: List[Tensor]) -> List[Tensor]:
+        logits= []
+        for batch in crops:
+            if len(batch) != 0:
+                x = batch.view(batch.size(0), -1)
+
+                x = F.relu(self.fc1(x), inplace=True)
+                x = F.relu(self.fc2(x), inplace=True)
+
+                batch_logits = self.logits_out(x)
+            else: 
+                batch_logits = torch.Tensor()
+
+            logits.append(batch_logits)
+
+        return logits
+
 
 
 class RetinaNetDetector(nn.Module):
@@ -181,14 +184,15 @@ class RetinaNetDetector(nn.Module):
             torch.nn.SmoothL1Loss(beta=1.0 / 9, reduction="mean"), encode_gt=True, decode_pred=False
         )  # box regression loss
 
+
         # default setting for both training and inference
         # can be updated by self.set_box_coder_weights(*)
         self.box_coder = BoxCoder(weights=(1.0,) * 2 * self.spatial_dims)
 
         # default keys in the ground truth targets and predicted boxes,
         # can be updated by self.set_target_keys(*)
-        self.target_box_key = "boxes"
-        self.target_label_key = "labels"
+        self.target_box_key = "box"
+        self.target_label_key = "label"
         self.pred_score_key = self.target_label_key + "_scores"  # score key for the detected boxes
 
         # default setting for inference,
@@ -226,6 +230,7 @@ class RetinaNetDetector(nn.Module):
         self.target_box_key = box_key
         self.target_label_key = label_key
         self.pred_score_key = label_key + "_scores"
+
 
     def set_cls_loss(self, cls_loss: nn.Module) -> None:
         """
@@ -269,6 +274,7 @@ class RetinaNetDetector(nn.Module):
         self.encode_gt = encode_gt
         self.decode_pred = decode_pred
 
+    
     def set_regular_matcher(self, fg_iou_thresh: float, bg_iou_thresh: float, allow_low_quality_matches=True) -> None:
         """
         Using for training. Set torchvision matcher that matches anchors with ground truth boxes.
@@ -295,7 +301,7 @@ class RetinaNetDetector(nn.Module):
         Args:
             num_candidates: number of positions to select candidates from.
                 Smaller value will result in a higher matcher threshold and less matched candidates.
-            center_in_gt: If False (default), matched anchor center points do not need
+                center_in_gt: If False (default), matched anchor center points do not need
                 to lie withing the ground truth box. Recommend False for small objects.
                 If True, will result in a strict matcher and less matched candidates.
         """
@@ -468,6 +474,7 @@ class RetinaNetDetector(nn.Module):
             # A = self.num_anchors_per_loc
             head_outputs[key] = self._reshape_maps(head_outputs[key])
 
+    
         # 6(1). If during training, return losses
         if self.training:
             losses = self.compute_loss(head_outputs, targets, self.anchors, num_anchor_locs_per_level)  # type: ignore
@@ -477,7 +484,9 @@ class RetinaNetDetector(nn.Module):
         detections = self.postprocess_detections(
             head_outputs, self.anchors, image_sizes, num_anchor_locs_per_level  # type: ignore
         )
+    
         return detections
+    
 
     def _check_detector_training_components(self):
         """
@@ -602,11 +611,11 @@ class RetinaNetDetector(nn.Module):
             box_regression_per_image = [
                 br[index] for br in box_regression
             ]  # List[Tensor], each sized (HWA, 2*spatial_dims)
-            logits_per_image = [cl[index] for cl in class_logits]  # List[Tensor], each sized (HWA, self.num_classes)
+            logits_per_image = [cl[index].detach() for cl in class_logits]  # List[Tensor], each sized (HWA, self.num_classes)
             anchors_per_image, img_spatial_size = split_anchors[index], image_sizes[index]
             # decode box regression into boxes
             boxes_per_image = [
-                self.box_coder.decode_single(b.to(torch.float32), a).to(compute_dtype)
+                self.box_coder.decode_single(b.to(torch.float32), a).to(compute_dtype).detach()
                 for b, a in zip(box_regression_per_image, anchors_per_image)
             ]  # List[Tensor], each sized (HWA, 2*spatial_dims)
 
@@ -630,6 +639,7 @@ class RetinaNetDetector(nn.Module):
         targets: List[Dict[str, Tensor]],
         anchors: List[Tensor],
         num_anchor_locs_per_level: Sequence[int],
+        iou_thresholds: float = 0.2,
     ) -> Dict[str, Tensor]:
         """
         Compute losses.
@@ -652,6 +662,7 @@ class RetinaNetDetector(nn.Module):
         losses_box_regression = self.compute_box_loss(
             head_outputs_reshape[self.box_reg_key], targets, anchors, matched_idxs
         )
+
         return {self.cls_key: losses_cls, self.box_reg_key: losses_box_regression}
 
     def compute_anchor_matched_idxs(
@@ -803,6 +814,7 @@ class RetinaNetDetector(nn.Module):
 
         return losses
 
+    
     def get_cls_train_sample_per_image(
         self, cls_logits_per_image: Tensor, targets_per_image: Dict[str, Tensor], matched_idxs_per_image: Tensor
     ) -> Tuple[Tensor, Tensor]:
@@ -931,3 +943,33 @@ class RetinaNetDetector(nn.Module):
             box_regression_per_image_ = self.box_coder.decode_single(box_regression_per_image_, anchors_per_image)
 
         return box_regression_per_image_, matched_gt_boxes_per_image_
+
+    def crop_roi(
+            self, features: List[Tensor], inputs: List[Tensor], proposals: List[List[Dict[str, Tensor]]], scale: int = 4, crop_size: Tuple = (7, 7, 7)
+        ):
+        crops_list = []
+        for i in range(len(features)):    
+            feature, input_image, proposal = features[i], inputs[i], proposals[i][0]['box']  
+            d, h, w = input_image.shape[1:]
+            crops = []
+            for p in proposal:
+                minimum = torch.LongTensor([[0, 0, 0]]).cuda()
+                maximum = torch.LongTensor(np.array([[d, h, w]]) / scale).cuda()
+
+                c0, _ = torch.max(torch.cat(((p[:3] / scale).floor().long().unsqueeze(0).cuda(), minimum), 0), 0)
+                c1, _ = torch.min(torch.cat(((p[3:] / scale).ceil().long().unsqueeze(0).cuda(), maximum), 0), 0)
+
+                # Slice 0 dim, should never happen
+                if np.any((c1 - c0).cpu().data.numpy() < 1):
+                    print(p)
+                    print('c0:', c0, ', c1:', c1)
+                crop = feature[:, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
+                crop = F.adaptive_max_pool3d(crop, crop_size)
+                crops.append(crop)
+            if len(crops) != 0:
+                crops = torch.stack(crops).squeeze(1)
+            else: 
+                crops = torch.Tensor()
+            crops_list.append(crops)
+
+        return crops_list

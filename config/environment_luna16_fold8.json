@@ -1,6 +1,6 @@
 {
-    "model_path": "trained_models/swin_unetr/model_luna16_fold8.pt",
-    "data_base_dir": "/nvmedata/ligen/PreprocessedImage",
+    "model_path": "trained_models/model_luna16_fold8.pt",
+    "data_base_dir": "/nvmedata/ligen/luna16",
     "data_list_file_path": "./LUNA16_datasplit/dataset_fold8_npy.json",
     "tfevent_path": "tfevent_train/fold8",
     "result_list_file_path": "trained_results/result_luna16_fold8.json"
