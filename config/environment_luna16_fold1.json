@@ -2,6 +2,6 @@
     "model_path": "trained_models/model_luna16_fold1.pt",
     "data_base_dir": "/nvmedata/ligen/luna16",
     "data_list_file_path": "LUNA16_datasplit/dataset_fold1_npy.json",
-    "tfevent_path": "tfevent_train/swin_unetr",
+    "tfevent_path": "tfevent_train",
     "result_list_file_path": "trained_results/result_luna16_fold1.json"
 }

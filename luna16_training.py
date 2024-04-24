@@ -24,7 +24,7 @@ from networks.retinanet_network import (
     RetinaNet,
     fpn_feature_extractor,
 )
-from networks.swin_unetr.swin_unetr_no_res  import SwinUNETR
+from networks.swin_unetr.swin_unetr  import SwinUNETR
 
 
 from monai.apps.detection.utils.anchor_utils import AnchorGeneratorWithAnchorShape
@@ -38,7 +38,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3,2'
 setproctitle.setproctitle("detection")
 
 def main():
@@ -46,7 +46,7 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./config/environment_luna16_fold0.json",
+        default="./config/environment_luna16_fold9.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
@@ -289,7 +289,7 @@ def main():
     best_val_epoch_metric = 0.0
     best_val_epoch = -1  # the epoch that gives best validation metrics
 
-    max_epochs = 300
+    max_epochs = 200
     epoch_len = len(train_ds) // train_loader.batch_size
     w_cls = config_dict.get("w_cls", 1.0)  # weight of classification loss, default 1.0
     w_reg = config_dict.get("w_reg", 1.0)  # weight of box regression loss, default 1.0
